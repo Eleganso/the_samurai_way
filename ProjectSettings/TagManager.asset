@@ -1,0 +1,61 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!78 &1
+TagManager:
+  serializedVersion: 3
+  tags:
+  - Wall
+  - Arrow
+  - Ladder
+  - Archer
+  - Attack1
+  - Attack2
+  - Attack3
+  - SpawnPoint
+  - SafeZone
+  - Enemy
+  - Merchant
+  - EnemyHead
+  - Shuriken
+  - Bush
+  - HookPoint
+  - Magic
+  layers:
+  - Default
+  - TransparentFX
+  - Ignore Raycast
+  - Background
+  - Water
+  - UI
+  - Ground
+  - Attackable
+  - Player
+  - Enemy
+  - PlayerHitbox
+  - EnemyHitbox
+  - Wall
+  - PlayerDodging
+  - Undodgeable
+  - Merchant
+  - Fireball
+  - EnemyAggro
+  - HiddenPlayer
+  - EnemyHitboxAggro
+  - hookableLayer
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  m_SortingLayers:
+  - name: Default
+    uniqueID: 0
+    locked: 0
+  m_RenderingLayers:
+  - Default

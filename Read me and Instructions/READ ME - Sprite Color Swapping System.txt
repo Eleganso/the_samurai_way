@@ -1,0 +1,85 @@
+# Sprite Color Swapping System
+
+This system allows you to dynamically swap colors in your sprite sheets without needing to create multiple versions of the same sprite. Perfect for creating variations of enemies, NPCs, or other game elements.
+
+## Setup Instructions
+
+### 1. Import the Files
+Place all the provided files in your Unity project:
+- `ColorSwapShader.shader` in your Shaders folder
+- `SpriteColorSwapper.cs` in your Scripts folder
+- `SpriteColorSwapperEditor.cs` in an Editor folder
+- `EnemyColorRandomizer.cs` in your Scripts folder (optional)
+
+### 2. Create the Material
+1. Right-click in your Project window → Create → Material
+2. Name it "ColorSwapMaterial"
+3. In the Inspector, change the Shader dropdown to "Custom/ColorSwapShader"
+
+### 3. Basic Setup
+1. Select your enemy GameObject
+2. Add the "SpriteColorSwapper" component
+3. Assign the SpriteRenderer (should auto-detect if it's on the same GameObject)
+4. Assign the ColorSwapMaterial you created
+
+### 4. Define Color Swaps
+1. In the SpriteColorSwapper component, click "Add Color Swap"
+2. Give it a descriptive name (e.g., "Hair", "Armor", "Skin")
+3. Click "Pick Original Color From Sprite" to select the color you want to replace
+4. Set the Target Color to what you want that color to become
+5. Adjust the Threshold value if needed (higher values will catch similar colors)
+6. Click "Apply Changes" to see the results
+
+### 5. For Random Enemy Colors (Optional)
+1. Add the "EnemyColorRandomizer" component to your enemy
+2. For each color group you want to randomize:
+   - Click "Add Element"
+   - Enter a name (e.g., "HairColors")
+   - Set the Original Color to match what you set in SpriteColorSwapper
+   - Add possible colors by increasing the size of the "possibleColors" array
+   - Set each color variant
+
+## How It Works
+
+The system uses a specialized shader that:
+1. Detects pixels in your sprite that match the Original Color (within the Threshold)
+2. Replaces those pixels with the Target Color while preserving shading
+
+This allows you to change specific parts of your sprites (like hair, weapons, armor) without affecting other parts.
+
+## Tips for Best Results
+
+1. **Use Distinctive Colors in Your Source Sprites**: Make sure the colors you want to replace are distinct from other colors in your sprite.
+
+2. **Test with Different Threshold Values**: If too much or too little is being colored, adjust the Threshold value.
+
+3. **For Complex Sprites**: Break down color swaps into multiple groups (Hair, Skin, Armor, etc.)
+
+4. **Performance Considerations**: Each color swap adds a small overhead. For most 2D games this is negligible, but try to keep the number of swaps reasonable.
+
+5. **Combining with Animation**: The system works with animated sprites as it applies to the SpriteRenderer, not individual frames.
+
+## Example: Creating Different Enemy Types
+
+```csharp
+// Example script to set specific color variants
+public class EnemyVariantManager : MonoBehaviour
+{
+    [SerializeField] private EnemyColorRandomizer colorRandomizer;
+    
+    public void SetToEliteVariant()
+    {
+        // Assuming you have a "ArmorColor" group with a gold color at index 2
+        colorRandomizer.SetSpecificVariant("ArmorColor", 2);
+        
+        // Set red eyes
+        colorRandomizer.SetSpecificVariant("EyeColor", 1);
+    }
+}
+```
+
+## Troubleshooting
+
+- **Colors Not Changing**: Ensure the original color exactly matches what's in your sprite
+- **Wrong Parts Changing**: Your threshold may be too high, try reducing it
+- **Performance Issues**: Reduce the number of color swaps or the size of the swap texture

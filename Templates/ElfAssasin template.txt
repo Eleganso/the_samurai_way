@@ -1,0 +1,208 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using System.Linq;
+
+public class ElfAssassin : MonoBehaviour
+{
+    [Header("References")]
+    [SerializeField] private Animator animator;
+    [SerializeField] private Rigidbody2D rb;
+    [SerializeField] private DetectionZone detectionZone;
+    [SerializeField] private SwordAttack swordAttackZone; // Reference to the SwordAttack script
+    [SerializeField] private Transform[] patrolPoints;
+    [SerializeField] private Transform playerTransform; // Reference to the player transform
+    [SerializeField] private AudioSource swingSoundSource; // AudioSource for swing sound
+    [SerializeField] private AudioSource hitSoundSource; // AudioSource for hit sound
+    private PlayerHealth playerHealth;
+    private EnemyHealth enemyHealth; // Reference to the EnemyHealth script
+
+    [Header("Settings")]
+    [SerializeField] private float moveSpeed = 3f;
+    [SerializeField] private float walkStopRate = 0.6f;
+    [SerializeField] private float chaseDistance = 5f;
+    [SerializeField] private int damage = 2; // Damage dealt to the player
+    [SerializeField] private float staggerTimer = 1f; // Duration for which movement is disabled after taking damage
+
+    private int patrolDestination = 0;
+    private bool isChasing = false;
+    private bool canMove = true; // Indicates whether the Elf Assassin can move
+
+    private void Awake()
+    {
+        animator = GetComponent<Animator>();
+        rb = GetComponent<Rigidbody2D>();
+        enemyHealth = GetComponent<EnemyHealth>(); // Get reference to EnemyHealth
+
+        // Find the player automatically
+        GameObject player = GameObject.FindGameObjectWithTag("Player");
+        if (player != null)
+        {
+            playerTransform = player.transform;
+            playerHealth = player.GetComponent<PlayerHealth>();
+        }
+    }
+
+    void Update()
+    {
+        // Check if the enemy is still alive
+        if (!enemyHealth.IsEnemyAlive)
+        {
+            // Stop chasing or attacking if the enemy is dead
+            isChasing = false;
+            rb.velocity = Vector2.zero;
+            return;
+        }
+
+        // Disable chasing if playerTransform is destroyed
+        if (playerTransform == null)
+        {
+            isChasing = false;
+        }
+        else
+        {
+            HasTarget = detectionZone.detectedColliders.Any(collider => collider.CompareTag("Player"));
+
+            // Attack if there's a target
+            if (HasTarget)
+            {
+                animator.SetTrigger("attack"); // Trigger attack animation
+            }
+        }
+    }
+
+    private void FixedUpdate()
+    {
+        // Only perform actions if the enemy is alive and can move
+        if (enemyHealth.IsEnemyAlive && canMove)
+        {
+            if (playerTransform != null) // Ensure playerTransform is not null
+            {
+                float distanceToPlayer = Vector2.Distance(transform.position, playerTransform.position);
+                if (isChasing && (distanceToPlayer <= chaseDistance))
+                {
+                    ChasePlayer();
+                }
+                else
+                {
+                    Patrol();
+                }
+            }
+            else
+            {
+                rb.velocity = Vector2.zero;
+            }
+        }
+    }
+
+    void ChasePlayer()
+    {
+        if (playerTransform == null) return;
+
+        float direction = transform.position.x > playerTransform.position.x ? -1 : 1;
+
+        // Adjust velocity based on walkStopRate, similar to DeathBringer behavior
+        if (canMove)
+        {
+            rb.velocity = new Vector2(direction * moveSpeed, rb.velocity.y);
+        }
+        else
+        {
+            rb.velocity = new Vector2(Mathf.Lerp(rb.velocity.x, 0, walkStopRate), rb.velocity.y);
+        }
+
+        // Update scale to face the player
+        transform.localScale = new Vector3(Mathf.Sign(direction) * Mathf.Abs(transform.localScale.x), transform.localScale.y, transform.localScale.z);
+
+        // Stop chasing if player is out of range
+        if (Vector2.Distance(transform.position, playerTransform.position) > chaseDistance)
+        {
+            isChasing = false;
+        }
+    }
+
+    void Patrol()
+    {
+        if (playerTransform == null) return;
+
+        if (Vector2.Distance(transform.position, playerTransform.position) < chaseDistance)
+        {
+            isChasing = true;
+        }
+        else
+        {
+            Vector2 targetPos = patrolPoints[patrolDestination].position;
+            targetPos.y = rb.position.y;
+            Vector2 newPos = Vector2.MoveTowards(rb.position, targetPos, moveSpeed * Time.fixedDeltaTime);
+            rb.MovePosition(newPos);
+            transform.localScale = new Vector3(patrolDestination == 0 ? -1 : 1, 1, 1);
+
+            if (Vector2.Distance(rb.position, targetPos) < 0.2f)
+            {
+                patrolDestination = (patrolDestination + 1) % patrolPoints.Length;
+            }
+        }
+    }
+
+    public void AttemptDealDamage()
+    {
+        // Check if the player is within the detectedColliders list before dealing damage
+        if (swordAttackZone.detectedColliders.Any(collider => collider.CompareTag("Player")))
+        {
+            DealDamageToPlayer();
+        }
+    }
+
+    private void DealDamageToPlayer()
+    {
+        if (HasTarget && playerHealth != null && Vector2.Distance(transform.position, playerHealth.transform.position) <= chaseDistance)
+        {
+            playerHealth.TakeDamage(damage);
+            hitSoundSource.Play(); // Play hit sound
+        }
+    }
+
+    // Method to handle taking damage
+    public void OnTakeDamage()
+    {
+        StartCoroutine(HandleStagger());
+    }
+
+    // Coroutine to handle stagger effect
+    private IEnumerator HandleStagger()
+    {
+        canMove = false; // Disable movement
+        animator.SetBool("canMove", false); // Set canMove to false in Animator
+        rb.velocity = Vector2.zero; // Stop movement immediately
+        animator.SetTrigger("takeDamage"); // Trigger the takeDamage animation
+        yield return new WaitForSeconds(staggerTimer); // Wait for staggerTimer duration
+        animator.SetBool("canMove", true); // Set canMove to true in Animator
+        canMove = true; // Enable movement again
+    }
+
+    // Method to be called by Animation Event
+    public void PlayAttackSound()
+    {
+        if (swingSoundSource != null)
+        {
+            swingSoundSource.Play();
+        }
+    }
+
+    public bool _hasTarget = false;
+    public bool HasTarget
+    {
+        get { return _hasTarget; }
+        private set
+        {
+            _hasTarget = value && playerTransform != null && Vector2.Distance(transform.position, playerTransform.position) <= chaseDistance;
+            animator.SetBool("hasTarget", _hasTarget); // Update the animator with the new value
+        }
+    }
+
+    void OnDrawGizmos()
+    {
+        Gizmos.color = Color.green;
+        Gizmos.DrawWireSphere(transform.position, chaseDistance);
+    }
+}
