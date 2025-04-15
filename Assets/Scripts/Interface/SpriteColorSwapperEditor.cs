@@ -1,251 +1,340 @@
 using UnityEngine;
 using UnityEditor;
+using System.Collections.Generic;
 
 #if UNITY_EDITOR
-[CustomEditor(typeof(SpriteColorSwapper))]
-public class SpriteColorSwapperEditor : Editor
+[CustomEditor(typeof(EnhancedEnemyColorRandomizer))]
+public class EnhancedEnemyColorRandomizerEditor : Editor
 {
-    private SerializedProperty targetRendererProp;
-    private SerializedProperty colorSwapMaterialProp;
-    private SerializedProperty applyOnStartProp;
-    private SerializedProperty colorSwapsProp;
-    private SerializedProperty colorThresholdProp;
+    private SerializedProperty colorSchemeGroupsProp;
+    private SerializedProperty randomizeOnAwakeProp;
+    private SerializedProperty randomSeedProp;
+    
+    private Dictionary<string, bool> groupFoldouts = new Dictionary<string, bool>();
+    private Dictionary<string, Dictionary<string, bool>> schemeFoldouts = 
+        new Dictionary<string, Dictionary<string, bool>>();
+    
+    private GUIStyle headerStyle;
+    private GUIStyle subHeaderStyle;
+    
+    private Texture2D spriteTexture;
+    private SpriteRenderer spriteRenderer;
     
     void OnEnable()
     {
-        targetRendererProp = serializedObject.FindProperty("targetRenderer");
-        colorSwapMaterialProp = serializedObject.FindProperty("colorSwapMaterial");
-        applyOnStartProp = serializedObject.FindProperty("applyOnStart");
-        colorSwapsProp = serializedObject.FindProperty("colorSwaps");
-        colorThresholdProp = serializedObject.FindProperty("colorThreshold");
+        colorSchemeGroupsProp = serializedObject.FindProperty("colorSchemeGroups");
+        randomizeOnAwakeProp = serializedObject.FindProperty("randomizeOnAwake");
+        randomSeedProp = serializedObject.FindProperty("randomSeed");
+        
+        // Find sprite renderer in hierarchy
+        EnhancedEnemyColorRandomizer targetScript = (EnhancedEnemyColorRandomizer)target;
+        spriteRenderer = targetScript.GetComponent<SpriteRenderer>();
+        
+        if (spriteRenderer != null && spriteRenderer.sprite != null)
+        {
+            // Get sprite texture
+            spriteTexture = GetReadableTexture(spriteRenderer.sprite);
+        }
     }
     
     public override void OnInspectorGUI()
     {
         serializedObject.Update();
         
-        SpriteColorSwapper swapper = (SpriteColorSwapper)target;
+        // Initialize styles
+        if (headerStyle == null)
+        {
+            headerStyle = new GUIStyle(EditorStyles.boldLabel);
+            headerStyle.fontSize = 14;
+            
+            subHeaderStyle = new GUIStyle(EditorStyles.boldLabel);
+            subHeaderStyle.fontSize = 12;
+        }
         
-        EditorGUILayout.LabelField("Sprite Color Swapper", EditorStyles.boldLabel);
+        // Title
+        EditorGUILayout.LabelField("Enhanced Enemy Color Randomizer", headerStyle);
+        EditorGUILayout.Space();
         
         // Basic settings
-        EditorGUILayout.PropertyField(targetRendererProp);
-        EditorGUILayout.PropertyField(colorSwapMaterialProp);
-        EditorGUILayout.PropertyField(applyOnStartProp);
-        EditorGUILayout.PropertyField(colorThresholdProp);
+        EditorGUILayout.PropertyField(randomizeOnAwakeProp);
+        EditorGUILayout.PropertyField(randomSeedProp);
         
-        // Color swaps list
+        // Buttons for testing
         EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Color Swaps (Max 10)", EditorStyles.boldLabel);
-        
-        // Warning if there are already 10 swaps
-        if (colorSwapsProp.arraySize >= 10)
+        EditorGUILayout.BeginHorizontal();
+        if (GUILayout.Button("Randomize Now (Editor)"))
         {
-            EditorGUILayout.HelpBox("Maximum of 10 color swaps reached. The shader supports up to 10 color swaps.", MessageType.Info);
-        }
-        else
-        {
-            if (GUILayout.Button("Add Color Swap"))
+            EnhancedEnemyColorRandomizer randomizer = (EnhancedEnemyColorRandomizer)target;
+            // Make sure the script has properly initialized
+            if (randomizer.GetComponent<SpriteColorSwapper>() == null)
             {
-                AddNewColorSwap();
+                Debug.LogError("SpriteColorSwapper component is missing on this GameObject! Please add it first.");
+                return;
             }
+            randomizer.RandomizeColors();
         }
         
-        if (GUILayout.Button("Clear All Swaps"))
+        if (GUILayout.Button("Reset Colors"))
         {
-            colorSwapsProp.ClearArray();
+            EnhancedEnemyColorRandomizer randomizer = (EnhancedEnemyColorRandomizer)target;
+            SpriteColorSwapper swapper = randomizer.GetComponent<SpriteColorSwapper>();
+            if (swapper != null)
+            {
+                swapper.ClearColorSwaps();
+            }
+        }
+        EditorGUILayout.EndHorizontal();
+        
+        // Color schemes section
+        EditorGUILayout.Space();
+        EditorGUILayout.LabelField("Color Schemes", headerStyle);
+        
+        // Add button
+        if (GUILayout.Button("Add Color Scheme Group"))
+        {
+            AddNewGroup();
         }
         
-        for (int i = 0; i < colorSwapsProp.arraySize; i++)
+        // Display color scheme groups
+        for (int i = 0; i < colorSchemeGroupsProp.arraySize; i++)
         {
-            SerializedProperty swapProp = colorSwapsProp.GetArrayElementAtIndex(i);
-            SerializedProperty nameProp = swapProp.FindPropertyRelative("name");
-            SerializedProperty originalColorProp = swapProp.FindPropertyRelative("originalColor");
-            SerializedProperty targetColorProp = swapProp.FindPropertyRelative("targetColor");
-            
-            EditorGUILayout.BeginVertical(GUI.skin.box);
-            
-            // Header with delete button
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField(nameProp.stringValue, EditorStyles.boldLabel);
-            
-            if (GUILayout.Button("X", GUILayout.Width(20)))
-            {
-                colorSwapsProp.DeleteArrayElementAtIndex(i);
-                break;
-            }
-            EditorGUILayout.EndHorizontal();
-            
-            EditorGUILayout.PropertyField(nameProp, new GUIContent("Name"));
-            EditorGUILayout.PropertyField(originalColorProp, new GUIContent("Original Color"));
-            EditorGUILayout.PropertyField(targetColorProp, new GUIContent("Target Color"));
-            
-            if (GUILayout.Button("Pick Original Color From Sprite"))
-            {
-                ShowColorPickerWindow(i);
-            }
-            
-            EditorGUILayout.EndVertical();
+            DisplayColorSchemeGroup(colorSchemeGroupsProp.GetArrayElementAtIndex(i), i);
+        }
+        
+        // Color picker
+        if (spriteTexture != null)
+        {
             EditorGUILayout.Space();
-        }
-        
-        // Apply button
-        EditorGUILayout.Space();
-        if (GUILayout.Button("Apply Changes"))
-        {
-            serializedObject.ApplyModifiedProperties();
+            EditorGUILayout.LabelField("Sprite Color Picker", headerStyle);
             
-            if (Application.isPlaying)
+            // Draw a scaled version of the sprite for color picking
+            float maxWidth = EditorGUIUtility.currentViewWidth - 40;
+            float scale = Mathf.Min(1, maxWidth / spriteTexture.width);
+            float displayWidth = spriteTexture.width * scale;
+            float displayHeight = spriteTexture.height * scale;
+            
+            Rect textureRect = GUILayoutUtility.GetRect(displayWidth, displayHeight);
+            EditorGUI.DrawPreviewTexture(textureRect, spriteTexture);
+            
+            EditorGUILayout.LabelField("Click on sprite to copy color", EditorStyles.miniLabel);
+            
+            Event evt = Event.current;
+            if (evt.type == EventType.MouseDown && textureRect.Contains(evt.mousePosition))
             {
-                swapper.ApplyColorSwaps();
+                // Calculate pixel coordinates
+                int x = Mathf.FloorToInt((evt.mousePosition.x - textureRect.x) / scale);
+                int y = Mathf.FloorToInt((evt.mousePosition.y - textureRect.y) / scale);
+                
+                // Make sure we're within bounds
+                if (x >= 0 && x < spriteTexture.width && y >= 0 && y < spriteTexture.height)
+                {
+                    // Get pixel color
+                    Color pixelColor = spriteTexture.GetPixel(x, y);
+                    
+                    // If alpha is not zero, copy to clipboard
+                    if (pixelColor.a > 0.01f)
+                    {
+                        // Format in a way that's easy to copy into code
+                        string colorValues = $"R: {pixelColor.r:F3}, G: {pixelColor.g:F3}, B: {pixelColor.b:F3}, A: {pixelColor.a:F3}";
+                        EditorGUIUtility.systemCopyBuffer = colorValues;
+                        Debug.Log($"Copied color: {colorValues}");
+                    }
+                }
             }
         }
         
         serializedObject.ApplyModifiedProperties();
     }
     
-    private void AddNewColorSwap()
+    private void DisplayColorSchemeGroup(SerializedProperty groupProp, int groupIndex)
     {
-        colorSwapsProp.arraySize++;
-        SerializedProperty newSwap = colorSwapsProp.GetArrayElementAtIndex(colorSwapsProp.arraySize - 1);
+        SerializedProperty nameProp = groupProp.FindPropertyRelative("name");
+        SerializedProperty schemesProp = groupProp.FindPropertyRelative("possibleSchemes");
         
-        newSwap.FindPropertyRelative("name").stringValue = "New Swap";
-        newSwap.FindPropertyRelative("originalColor").colorValue = Color.white;
-        newSwap.FindPropertyRelative("targetColor").colorValue = Color.red;
+        string groupName = nameProp.stringValue;
+        if (string.IsNullOrEmpty(groupName))
+            groupName = "Group " + groupIndex;
+            
+        // Make sure we have a foldout entry for this group
+        if (!groupFoldouts.ContainsKey(groupName))
+            groupFoldouts[groupName] = false;
+            
+        // Group header with foldout
+        EditorGUILayout.BeginVertical(GUI.skin.box);
+        EditorGUILayout.BeginHorizontal();
+        
+        groupFoldouts[groupName] = EditorGUILayout.Foldout(groupFoldouts[groupName], "", true);
+        EditorGUILayout.PropertyField(nameProp, GUIContent.none);
+        
+        if (GUILayout.Button("X", GUILayout.Width(20)))
+        {
+            colorSchemeGroupsProp.DeleteArrayElementAtIndex(groupIndex);
+            return;
+        }
+        EditorGUILayout.EndHorizontal();
+        
+        // If group is expanded, show details
+        if (groupFoldouts[groupName])
+        {
+            EditorGUI.indentLevel++;
+            
+            // Add new scheme button
+            if (GUILayout.Button("Add Color Scheme"))
+            {
+                AddNewScheme(schemesProp);
+            }
+            
+            // Display each color scheme
+            for (int i = 0; i < schemesProp.arraySize; i++)
+            {
+                DisplayColorScheme(schemesProp.GetArrayElementAtIndex(i), groupName, i);
+            }
+            
+            EditorGUI.indentLevel--;
+        }
+        
+        EditorGUILayout.EndVertical();
+        EditorGUILayout.Space();
     }
     
-    private void ShowColorPickerWindow(int swapIndex)
+    private void DisplayColorScheme(SerializedProperty schemeProp, string groupName, int schemeIndex)
     {
-        SpriteColorSwapper swapper = (SpriteColorSwapper)target;
-        SpriteRenderer renderer = null;
+        SerializedProperty schemeNameProp = schemeProp.FindPropertyRelative("name");
+        SerializedProperty replacementsProp = schemeProp.FindPropertyRelative("colorReplacements");
         
-        // Try to get the target renderer from the swapper
-        SerializedProperty rendererProp = serializedObject.FindProperty("targetRenderer");
-        if (rendererProp != null && rendererProp.objectReferenceValue != null)
+        string schemeName = schemeNameProp.stringValue;
+        if (string.IsNullOrEmpty(schemeName))
+            schemeName = "Scheme " + schemeIndex;
+            
+        // Make sure we have nested dictionaries for scheme foldouts
+        if (!schemeFoldouts.ContainsKey(groupName))
+            schemeFoldouts[groupName] = new Dictionary<string, bool>();
+            
+        if (!schemeFoldouts[groupName].ContainsKey(schemeName))
+            schemeFoldouts[groupName][schemeName] = false;
+            
+        // Scheme header with foldout
+        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+        EditorGUILayout.BeginHorizontal();
+        
+        schemeFoldouts[groupName][schemeName] = EditorGUILayout.Foldout(
+            schemeFoldouts[groupName][schemeName], "", true);
+        EditorGUILayout.PropertyField(schemeNameProp, GUIContent.none);
+        
+        if (GUILayout.Button("X", GUILayout.Width(20)))
         {
-            renderer = rendererProp.objectReferenceValue as SpriteRenderer;
+            replacementsProp.DeleteArrayElementAtIndex(schemeIndex);
+            return;
+        }
+        EditorGUILayout.EndHorizontal();
+        
+        // If scheme is expanded, show details
+        if (schemeFoldouts[groupName][schemeName])
+        {
+            EditorGUI.indentLevel++;
+            
+            // Add new color replacement button
+            if (GUILayout.Button("Add Color Replacement"))
+            {
+                AddNewColorReplacement(replacementsProp);
+            }
+            
+            // Display each color replacement
+            for (int i = 0; i < replacementsProp.arraySize; i++)
+            {
+                DisplayColorReplacement(replacementsProp.GetArrayElementAtIndex(i), i);
+            }
+            
+            EditorGUI.indentLevel--;
         }
         
-        // If not assigned, try to get it from the same GameObject
-        if (renderer == null)
-        {
-            renderer = swapper.GetComponent<SpriteRenderer>();
-        }
+        EditorGUILayout.EndVertical();
+    }
+    
+    private void DisplayColorReplacement(SerializedProperty replacementProp, int index)
+    {
+        SerializedProperty originalColorProp = replacementProp.FindPropertyRelative("originalColor");
+        SerializedProperty targetColorProp = replacementProp.FindPropertyRelative("targetColor");
         
-        if (renderer == null || renderer.sprite == null)
+        EditorGUILayout.BeginHorizontal();
+        
+        // Color fields with labels
+        EditorGUILayout.BeginVertical();
+        EditorGUILayout.LabelField("Original", EditorStyles.miniLabel);
+        EditorGUILayout.PropertyField(originalColorProp, GUIContent.none);
+        EditorGUILayout.EndVertical();
+        
+        EditorGUILayout.BeginVertical();
+        EditorGUILayout.LabelField("Target", EditorStyles.miniLabel);
+        EditorGUILayout.PropertyField(targetColorProp, GUIContent.none);
+        EditorGUILayout.EndVertical();
+        
+        if (GUILayout.Button("X", GUILayout.Width(20)))
         {
-            EditorUtility.DisplayDialog("Error", "No sprite found on the target renderer.", "OK");
+            replacementProp.DeleteCommand();
             return;
         }
         
-        ColorPickerWindow.ShowWindow(swapper, renderer.sprite, swapIndex);
+        EditorGUILayout.EndHorizontal();
     }
     
-    private class ColorPickerWindow : EditorWindow
+    private void AddNewGroup()
     {
-        private static Texture2D spriteTexture;
-        private static SpriteColorSwapper targetSwapper;
-        private static int swapIndex;
-        private static Vector2 scrollPosition;
-        private static float zoom = 8.0f;
+        int index = colorSchemeGroupsProp.arraySize;
+        colorSchemeGroupsProp.InsertArrayElementAtIndex(index);
+        SerializedProperty newGroup = colorSchemeGroupsProp.GetArrayElementAtIndex(index);
         
-        public static void ShowWindow(SpriteColorSwapper swapper, Sprite sprite, int index)
-        {
-            targetSwapper = swapper;
-            swapIndex = index;
-            
-            // Create texture from sprite
-            spriteTexture = new Texture2D(
-                (int)sprite.rect.width, 
-                (int)sprite.rect.height, 
-                TextureFormat.RGBA32, 
-                false);
-                
-            Color[] pixels = sprite.texture.GetPixels(
-                (int)sprite.rect.x, 
-                (int)sprite.rect.y, 
-                (int)sprite.rect.width, 
-                (int)sprite.rect.height);
-                
-            spriteTexture.SetPixels(pixels);
-            spriteTexture.Apply();
-            
-            // Create window
-            ColorPickerWindow window = GetWindow<ColorPickerWindow>();
-            window.titleContent = new GUIContent("Color Picker");
-            window.minSize = new Vector2(300, 300);
-            window.ShowUtility();
-        }
+        // Set default values
+        newGroup.FindPropertyRelative("name").stringValue = "New Group";
+        SerializedProperty schemes = newGroup.FindPropertyRelative("possibleSchemes");
+        schemes.ClearArray();
+    }
+    
+    private void AddNewScheme(SerializedProperty schemesProp)
+    {
+        int index = schemesProp.arraySize;
+        schemesProp.InsertArrayElementAtIndex(index);
+        SerializedProperty newScheme = schemesProp.GetArrayElementAtIndex(index);
         
-        void OnGUI()
-        {
-            if (spriteTexture == null || targetSwapper == null)
-            {
-                Close();
-                return;
-            }
-            
-            GUILayout.Label("Click on a pixel to select its color", EditorStyles.boldLabel);
-            
-            // Zoom control
-            EditorGUILayout.BeginHorizontal();
-            GUILayout.Label("Zoom:", GUILayout.Width(50));
-            zoom = EditorGUILayout.Slider(zoom, 1.0f, 16.0f);
-            EditorGUILayout.EndHorizontal();
-            
-            // Calculate display size
-            float displayWidth = spriteTexture.width * zoom;
-            float displayHeight = spriteTexture.height * zoom;
-            
-            // Begin scroll view
-            Rect viewRect = new Rect(0, 0, displayWidth, displayHeight);
-            scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition, GUILayout.ExpandHeight(true));
-            
-            // Draw zoomed texture
-            Rect texRect = GUILayoutUtility.GetRect(displayWidth, displayHeight);
-            GUI.DrawTexture(texRect, spriteTexture, ScaleMode.StretchToFill);
-            
-            // Handle mouse clicks
-            Event evt = Event.current;
-            if (evt.type == EventType.MouseDown && evt.button == 0 && texRect.Contains(evt.mousePosition))
-            {
-                // Calculate pixel position
-                int x = Mathf.FloorToInt((evt.mousePosition.x - texRect.x) / zoom);
-                int y = spriteTexture.height - 1 - Mathf.FloorToInt((evt.mousePosition.y - texRect.y) / zoom);
-                
-                // Get pixel color
-                Color pickedColor = spriteTexture.GetPixel(x, y);
-                
-                // Only use pixels with some opacity
-                if (pickedColor.a > 0.1f)
-                {
-                    // Update serialized property
-                    SerializedObject so = new SerializedObject(targetSwapper);
-                    SerializedProperty colorSwapsProp = so.FindProperty("colorSwaps");
-                    SerializedProperty swapProp = colorSwapsProp.GetArrayElementAtIndex(swapIndex);
-                    SerializedProperty originalColorProp = swapProp.FindPropertyRelative("originalColor");
-                    
-                    originalColorProp.colorValue = pickedColor;
-                    so.ApplyModifiedProperties();
-                    
-                    // Close window
-                    Close();
-                }
-            }
-            
-            EditorGUILayout.EndScrollView();
-            
-            GUILayout.Label("Click on a colored pixel to pick its color");
-        }
+        // Set default values
+        newScheme.FindPropertyRelative("name").stringValue = "New Scheme";
+        SerializedProperty replacements = newScheme.FindPropertyRelative("colorReplacements");
+        replacements.ClearArray();
+    }
+    
+    private void AddNewColorReplacement(SerializedProperty replacementsProp)
+    {
+        int index = replacementsProp.arraySize;
+        replacementsProp.InsertArrayElementAtIndex(index);
+        SerializedProperty newReplacement = replacementsProp.GetArrayElementAtIndex(index);
         
-        void OnDestroy()
-        {
-            // Clean up
-            if (spriteTexture != null)
-            {
-                DestroyImmediate(spriteTexture);
-            }
-        }
+        // Set default values
+        newReplacement.FindPropertyRelative("originalColor").colorValue = Color.white;
+        newReplacement.FindPropertyRelative("targetColor").colorValue = Color.red;
+    }
+    
+    // Helper to get a readable texture from a sprite
+    private Texture2D GetReadableTexture(Sprite sprite)
+    {
+        if (sprite == null || sprite.texture == null)
+            return null;
+            
+        Texture2D original = sprite.texture;
+        
+        // Create a temporary texture with the sprite's area
+        Texture2D copy = new Texture2D((int)sprite.rect.width, (int)sprite.rect.height, TextureFormat.RGBA32, false);
+        
+        // Set pixels from the sprite's texture area
+        Color[] pixels = original.GetPixels(
+            (int)sprite.rect.x, 
+            (int)sprite.rect.y, 
+            (int)sprite.rect.width, 
+            (int)sprite.rect.height);
+            
+        copy.SetPixels(pixels);
+        copy.Apply();
+        
+        return copy;
     }
 }
 #endif

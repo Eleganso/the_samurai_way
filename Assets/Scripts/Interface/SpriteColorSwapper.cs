@@ -47,6 +47,11 @@ public class SpriteColorSwapper : MonoBehaviour
         }
     }
 
+    public bool IsInitialized()
+    {
+        return initialized;
+    }
+
     public void Initialize()
     {
         if (initialized)
@@ -151,6 +156,21 @@ public class SpriteColorSwapper : MonoBehaviour
         }
     }
 
+    // Get the number of current color swaps
+    public int GetSwapCount()
+    {
+        return colorSwaps.Count;
+    }
+    
+    // Get a specific color swap
+    public ColorSwapPair GetSwap(int index)
+    {
+        if (index >= 0 && index < colorSwaps.Count)
+            return colorSwaps[index];
+            
+        return null;
+    }
+    
     // Utility method to clear all color swaps
     public void ClearColorSwaps()
     {
