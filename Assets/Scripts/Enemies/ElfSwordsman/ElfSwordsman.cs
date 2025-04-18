@@ -19,14 +19,70 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
     private PlayerHealth playerHealth;
     private EnemyHealth enemyHealth;
 
-    [Header("Settings")]
+    [Header("Movement Settings")]
     [SerializeField] private float moveSpeed = 3f;
     [SerializeField] private float patrolSpeed = 1.5f;
     [SerializeField] private float walkStopRate = 0.6f;
+    [SerializeField] private float backupDistance = 2f;
+    [SerializeField] private float idealCombatDistance = 1.5f; // Slightly closer for more aggression
+    [SerializeField] private float circlingSpeed = 1.5f; // Faster to be more dynamic
+
+    [Header("Combat Settings")]
     [SerializeField] private float damage = 2;
     [SerializeField] private float staggerTimer = 1f;
     [SerializeField] private float disableDuration = 2.5f;
     [SerializeField] private float disableMoveSpeed = 1f;
+    [SerializeField] private float counterAttackChance = 0.7f; // Increased chance to counter
+    [SerializeField] private float fatigueTime = 4f; // Reduced fatigue time
+    [SerializeField] private float retreatSpeedMultiplier = 2.0f; // Double speed
+    [SerializeField] private float maxRetreatDistance = 4f; // Maximum distance to retreat
+    [SerializeField] private float maxRetreatDuration = 1.5f; // Maximum time to retreat
+    
+    [Header("Special Attack Settings")]
+    [SerializeField] private float chargeDuration = 1f;
+    [SerializeField] private float chargeSpeed = 5f;
+    [SerializeField] private float lungeSpeed = 6f;
+    [SerializeField] private float specialAttackCooldown = 6f; // Reduced cooldown
+    [SerializeField] private float specialAttackChance = 0.5f; // Increased chance
+    
+    [Header("Combat Style Settings")]
+    [SerializeField, Range(0f, 1f)] private float aggressiveness = 0.8f; // More aggressive
+    [SerializeField, Range(0f, 1f)] private float defensiveness = 0.2f; // Less defensive
+    [SerializeField, Range(0f, 1f)] private float unpredictability = 0.8f; // More unpredictable
+
+    [Header("Proximity Detection")]
+    [SerializeField] private float proximityDetectionRadius = 1.5f;
+    [SerializeField] private float proximityDetectionOffsetX = 0f;
+    [SerializeField] private float proximityDetectionOffsetY = 0f;
+    [SerializeField] private float chaseDistanceAggro = 10f;
+
+    // Combat States
+    public enum CombatState
+    {
+        Patrol,
+        Chase,
+        CircleStrafe,
+        Attack,
+        Charge,
+        Retreat,
+        WaitAndObserve,
+        FeintAttack,
+        BackupToIdealRange,
+        Staggered,
+        Disabled,
+        HalfHealthAction,
+        SpecialAction
+    }
+
+    private CombatState currentState = CombatState.Patrol;
+    private CombatState previousState = CombatState.Patrol;
+    private float stateDuration = 0f;
+    private float stateTimer = 0f;
+    private float specialAttackTimer = 0f;
+    private float fatigueTimer = 0f;
+    private int consecutiveAttacks = 0;
+    private int maxConsecutiveAttacks = 4; // Increased for longer combos
+    private float lastDistanceToPlayer = 0f;
 
     private int patrolDestination = 0;
     private bool isChasing = false;
@@ -35,32 +91,44 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
     private bool playerOnHead = false;
     private bool isStaggering = false;
     private bool isCharging = false;
+    private bool isFeinting = false;
+    private bool isObserving = false;
+    private bool isRetreating = false;
+    private bool isCircling = false;
+    private bool isFatigued = false;
+    private bool isAttacking = false; // Added to prevent attack interruption
     public bool aggro = false;
+    private bool isPlayingAttackAnimation = false;
+
 
     private bool hasPerformedHalfHealthAction = false;
     private float actionCooldownTimer = 0f;
     private bool isPerformingHalfHealthAction = false;
     private bool isPerformingSomeAction = false;
 
-    [Header("Move Away Settings")]
-    [SerializeField] private float chargeDuration = 1f;
-    [SerializeField] private float chargeSpeed = 5f;
-
     private float chargeDirectionFacing = 0f;
-
-    [Header("Proximity Detection")]
-    [SerializeField] private float proximityDetectionRadius = 1.5f;
-    [SerializeField] private float proximityDetectionOffsetX = 0f;
-    [SerializeField] private float proximityDetectionOffsetY = 0f;
     private bool isPlayerInProximity = false;
-
-    [Header("Aggro Chase Distance")]
-    [SerializeField] private float chaseDistanceAggro = 10f;
     private bool isPlayerInChaseZone = false;
-
     private bool previousAggroState = false;
+    private int circlingDirection = 1;
 
     private void Awake()
+    {
+        InitializeComponents();
+        aggro = false;
+        previousAggroState = false;
+        gameObject.layer = LayerMask.NameToLayer("Enemy");
+        specialAttackTimer = specialAttackCooldown;
+    }
+    
+    private void Start()
+    {
+        // Start with high values to make enemy aggressive immediately
+        aggressiveness = Mathf.Lerp(aggressiveness, 1.0f, 0.5f);
+        specialAttackChance = Mathf.Lerp(specialAttackChance, 0.6f, 0.5f);
+    }
+
+    private void InitializeComponents()
     {
         animator = GetComponent<Animator>();
         rb = GetComponent<Rigidbody2D>();
@@ -89,23 +157,81 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
         {
             Debug.LogError("ChaseZone not found. Please ensure the ChaseZone script is attached to a child object.");
         }
-
-        aggro = false;
-        previousAggroState = false;
-        gameObject.layer = LayerMask.NameToLayer("Enemy");
     }
 
-    void Update()
+    private void Update()
+{
+    if (isBehaviorDisabled)
     {
-        if (isBehaviorDisabled || !canMove || isStaggering || isPerformingHalfHealthAction || isPerformingSomeAction || isCharging)
-            return;
+        currentState = CombatState.Disabled;
+        return;
+    }
 
-        HasTarget = detectionZone.detectedColliders.Count > 0;
+    UpdateTimers();
+    UpdateStateBasedOnEnvironment();
+    
+    // Check if the player is detected by the detection zone
+    bool playerDetected = detectionZone.detectedColliders.Count > 0;
+    
+    // If player is detected and we're not already attacking or fatigued, initiate attack
+    if (playerDetected && !isPlayingAttackAnimation && !isStaggering && 
+        !isFatigued && !isPerformingHalfHealthAction && !isPerformingSomeAction &&
+        currentState != CombatState.Attack && currentState != CombatState.Disabled)
+    {
+        ChangeState(CombatState.Attack);
+    }
+    // Otherwise continue with normal state handling
+    else if (currentState != CombatState.Staggered && 
+            currentState != CombatState.Disabled && 
+            currentState != CombatState.HalfHealthAction && 
+            currentState != CombatState.SpecialAction && 
+            !isPlayingAttackAnimation)
+    {
+        UpdateEnemyState();
+        HandleStateBehavior();
+    }
+    
+    HandleHalfHealthAction();
+    UpdateAnimator();
+    
+    // Debug logging for state changes
+    if (previousState != currentState)
+    {
+        Debug.Log($"{gameObject.name} changed state from {previousState} to {currentState}");
+        previousState = currentState;
+    }
+}
 
+    private void UpdateTimers()
+    {
+        if (stateTimer > 0)
+            stateTimer -= Time.deltaTime;
+            
+        if (specialAttackTimer > 0)
+            specialAttackTimer -= Time.deltaTime;
+            
+        if (fatigueTimer > 0)
+        {
+            fatigueTimer -= Time.deltaTime;
+            isFatigued = true;
+        }
+        else
+        {
+            isFatigued = false;
+        }
+        
+        if (actionCooldownTimer > 0f)
+            actionCooldownTimer -= Time.deltaTime;
+    }
+
+    private void UpdateStateBasedOnEnvironment()
+    {
         // Calculate the center of the proximity detection with offsets
         Vector2 proximityCenter = new Vector2(transform.position.x + proximityDetectionOffsetX, transform.position.y + proximityDetectionOffsetY);
-
         isPlayerInProximity = Vector2.Distance(proximityCenter, playerTransform.position) <= proximityDetectionRadius;
+        
+        HasTarget = detectionZone.detectedColliders.Count > 0;
+        lastDistanceToPlayer = Vector2.Distance(transform.position, playerTransform.position);
 
         bool isPlayerDetectable = true;
         if (player != null)
@@ -116,6 +242,7 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
             }
         }
 
+        // Determine aggro state
         if (!aggro)
         {
             if (isPlayerInProximity)
@@ -134,8 +261,7 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
 
         if (aggro)
         {
-            float distanceToPlayer = Vector2.Distance(transform.position, playerTransform.position);
-            if (distanceToPlayer <= chaseDistanceAggro)
+            if (lastDistanceToPlayer <= chaseDistanceAggro)
             {
                 isChasing = true;
             }
@@ -151,13 +277,198 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
         }
 
         UpdateLayerBasedOnAggro();
+    }
 
-        HandleHalfHealthAction();
+    private void UpdateEnemyState()
+    {
+        // Don't change state if we're still in our current state's duration or attacking
+        if (stateTimer > 0 || isAttacking)
+            return;
 
-        if (HasTarget && canMove && !isCharging)
+        // First priority - If fatigued, always retreat
+        if (isFatigued)
         {
-            animator.SetTrigger("attack");
+            ChangeState(CombatState.Retreat);
+            return;
         }
+        
+        // Second priority - Special attacks
+        if (isPlayerInProximity && HasTarget && Random.value < specialAttackChance && specialAttackTimer <= 0)
+        {
+            ChangeState(CombatState.Charge);
+            specialAttackTimer = specialAttackCooldown;
+            return;
+        }
+        
+        // Third priority - In chase zone = ATTACK (this is your key logic)
+        if (isPlayerInChaseZone && HasTarget && !isFatigued)
+        {
+            // Mix in some feints occasionally for unpredictability
+            if (Random.value < 0.25f * unpredictability && consecutiveAttacks < maxConsecutiveAttacks)
+                ChangeState(CombatState.FeintAttack);
+            else
+                ChangeState(CombatState.Attack);
+            return;
+        }
+        
+        // Fourth priority - Maintain ideal combat distance
+        if (aggro && lastDistanceToPlayer < idealCombatDistance * 0.7f)
+        {
+            ChangeState(CombatState.BackupToIdealRange);
+            return;
+        }
+        
+        // If none of the above, use the state machine for other behaviors
+        switch (currentState)
+        {
+            case CombatState.Patrol:
+                if (aggro)
+                    ChangeState(CombatState.Chase);
+                break;
+                
+            case CombatState.Chase:
+                if (!aggro)
+                {
+                    ChangeState(CombatState.Patrol);
+                }
+                else if (HasTarget && lastDistanceToPlayer <= idealCombatDistance * 1.2f)
+                {
+                    // If we're not in chase zone but close enough, circle or observe
+                    if (Random.value < 0.7f)
+                        ChangeState(CombatState.CircleStrafe);
+                    else
+                        ChangeState(CombatState.WaitAndObserve);
+                }
+                break;
+                
+            case CombatState.Attack:
+                consecutiveAttacks++;
+                if (consecutiveAttacks >= maxConsecutiveAttacks)
+                {
+                    fatigueTimer = fatigueTime;
+                    consecutiveAttacks = 0;
+                }
+                
+                if (Random.value < 0.7f)
+                    ChangeState(CombatState.CircleStrafe);
+                else
+                    ChangeState(CombatState.BackupToIdealRange);
+                break;
+                
+            case CombatState.FeintAttack:
+                if (Random.value < 0.6f)
+                    ChangeState(CombatState.Attack);
+                else
+                    ChangeState(CombatState.CircleStrafe);
+                break;
+                
+            case CombatState.CircleStrafe:
+                if (lastDistanceToPlayer > idealCombatDistance * 1.5f)
+                    ChangeState(CombatState.Chase);
+                else if (Random.value < 0.3f)
+                    ChangeState(CombatState.WaitAndObserve);
+                else
+                    circlingDirection = Random.value < 0.5f ? 1 : -1;
+                break;
+                
+            case CombatState.WaitAndObserve:
+                if (Random.value < 0.4f)
+                    ChangeState(CombatState.CircleStrafe);
+                else if (lastDistanceToPlayer > idealCombatDistance * 1.3f)
+                    ChangeState(CombatState.Chase);
+                break;
+                
+            case CombatState.BackupToIdealRange:
+                if (lastDistanceToPlayer >= idealCombatDistance)
+                    ChangeState(CombatState.CircleStrafe);
+                break;
+                
+            case CombatState.Retreat:
+                if (lastDistanceToPlayer >= backupDistance && !isFatigued)
+                {
+                    if (Random.value < 0.7f)
+                        ChangeState(CombatState.WaitAndObserve);
+                    else
+                        ChangeState(CombatState.CircleStrafe);
+                }
+                break;
+                
+            case CombatState.Charge:
+                // This state is handled by coroutine
+                break;
+        }
+    }
+
+    private void ChangeState(CombatState newState)
+    {
+        previousState = currentState;
+        currentState = newState;
+        
+        // Set up state-specific variables
+        switch (newState)
+        {
+            case CombatState.Patrol:
+                stateTimer = 0f;
+                break;
+                
+            case CombatState.Chase:
+                stateTimer = 0f;
+                break;
+                
+            case CombatState.CircleStrafe:
+                stateTimer = Random.Range(1.0f, 2.0f); // Shorter durations to keep it dynamic
+                circlingDirection = Random.value < 0.5f ? 1 : -1;
+                break;
+                
+            case CombatState.Attack:
+                stateTimer = 1.5f;
+                StartCoroutine(CompleteAttackSequence());
+                break;
+                
+            case CombatState.FeintAttack:
+                stateTimer = Random.Range(0.3f, 0.7f); // Shorter feint
+                break;
+                
+            case CombatState.WaitAndObserve:
+                stateTimer = Random.Range(0.5f, 1.5f) * (isFatigued ? 1.5f : 1f); // Shorter observation
+                break;
+                
+            case CombatState.BackupToIdealRange:
+                stateTimer = Random.Range(0.8f, 1.5f);
+                break;
+                
+            case CombatState.Retreat:
+                stateTimer = Random.Range(1.0f, 2.0f);
+                break;
+                
+            case CombatState.Charge:
+                stateTimer = chargeDuration;
+                StartCoroutine(PerformCharge());
+                break;
+        }
+    }
+
+    private IEnumerator CompleteAttackSequence()
+    {
+        // Set attacking flag to prevent state changes during attack
+        isAttacking = true;
+        
+        // Reset triggers to ensure clean animation
+        animator.ResetTrigger("feint");
+        animator.ResetTrigger("specialAttack");
+        animator.SetTrigger("attack");
+        
+        // Wait for attack animation to complete
+        float attackAnimDuration = 0.8f; // Adjust to match your animation length
+        yield return new WaitForSeconds(attackAnimDuration);
+        
+        // Attack completed
+        isAttacking = false;
+    }
+
+    private void HandleStateBehavior()
+    {
+        // This will be called from FixedUpdate for actual movement
     }
 
     private void FixedUpdate()
@@ -168,25 +479,65 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
             return;
         }
 
+        // If handling special actions, these coroutines control movement
         if (isPerformingHalfHealthAction || isPerformingSomeAction)
         {
-            rb.linearVelocity = new Vector2(chargeDirectionFacing * chargeSpeed, rb.linearVelocity.y);
             return;
         }
 
+        // Player is on head, temporarily use patrol behavior
         if (playerOnHead)
         {
             PatrolWithSpeed(patrolSpeed);
             return;
         }
 
-        if (isChasing)
+        // Execute behavior based on current state
+        switch (currentState)
         {
-            ChasePlayer(moveSpeed);
-        }
-        else
-        {
-            PatrolWithSpeed(patrolSpeed);
+            case CombatState.Patrol:
+                PatrolWithSpeed(patrolSpeed);
+                break;
+                
+            case CombatState.Chase:
+                ChasePlayer(moveSpeed);
+                break;
+                
+            case CombatState.Attack:
+                rb.linearVelocity = new Vector2(Mathf.Lerp(rb.linearVelocity.x, 0, walkStopRate), rb.linearVelocity.y);
+                break;
+                
+            case CombatState.FeintAttack:
+                // Move slightly toward player for feint
+                float feintDirection = transform.position.x > playerTransform.position.x ? -1 : 1;
+                rb.linearVelocity = new Vector2(feintDirection * moveSpeed * 0.5f, rb.linearVelocity.y);
+                break;
+                
+            case CombatState.CircleStrafe:
+                PerformCircleStrafe();
+                break;
+                
+            case CombatState.WaitAndObserve:
+                // Slow to a stop
+                rb.linearVelocity = new Vector2(Mathf.Lerp(rb.linearVelocity.x, 0, walkStopRate), rb.linearVelocity.y);
+                // Always face player
+                FacePlayer();
+                break;
+                
+            case CombatState.BackupToIdealRange:
+                BackupFromPlayer();
+                break;
+                
+            case CombatState.Retreat:
+                RetreatFromPlayer();
+                break;
+                
+            case CombatState.Staggered:
+            case CombatState.Disabled:
+                rb.linearVelocity = new Vector2(Mathf.Lerp(rb.linearVelocity.x, 0, walkStopRate), rb.linearVelocity.y);
+                break;
+                
+            // Charge state is handled by coroutine
         }
     }
 
@@ -206,7 +557,7 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
             rb.linearVelocity = new Vector2(Mathf.Lerp(rb.linearVelocity.x, 0, walkStopRate), rb.linearVelocity.y);
         }
 
-        transform.localScale = new Vector3(Mathf.Sign(direction) * Mathf.Abs(transform.localScale.x), transform.localScale.y, transform.localScale.z);
+        FaceDirection(direction);
     }
 
     void PatrolWithSpeed(float currentMoveSpeed)
@@ -218,12 +569,165 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
         targetPos.y = rb.position.y;
         Vector2 newPos = Vector2.MoveTowards(rb.position, targetPos, currentMoveSpeed * Time.fixedDeltaTime);
         rb.MovePosition(newPos);
-        transform.localScale = new Vector3(patrolDestination == 0 ? -1 : 1, 1, 1);
+        
+        // Face the patrol destination
+        float direction = transform.position.x < targetPos.x ? 1 : -1;
+        FaceDirection(direction);
 
         if (Vector2.Distance(rb.position, targetPos) < 0.2f)
         {
             patrolDestination = (patrolDestination + 1) % patrolPoints.Length;
         }
+    }
+
+    void PerformCircleStrafe()
+    {
+        // Calculate direction to player
+        Vector2 dirToPlayer = playerTransform.position - transform.position;
+        float distToPlayer = dirToPlayer.magnitude;
+        
+        // Normalize and get perpendicular vector for circling
+        dirToPlayer.Normalize();
+        Vector2 perpendicular = new Vector2(-dirToPlayer.y, dirToPlayer.x) * circlingDirection;
+        
+        // Adjust movement to maintain ideal distance
+        float distanceFactor = Mathf.Clamp((distToPlayer - idealCombatDistance) / idealCombatDistance, -1f, 1f);
+        Vector2 moveDir = perpendicular + dirToPlayer * distanceFactor * 0.5f;
+        moveDir.Normalize();
+        
+        // Apply movement
+        rb.linearVelocity = new Vector2(moveDir.x * circlingSpeed, rb.linearVelocity.y);
+        
+        // Always face the player while circling
+        FacePlayer();
+    }
+
+    void BackupFromPlayer()
+    {
+        float direction = transform.position.x > playerTransform.position.x ? 1 : -1;
+        rb.linearVelocity = new Vector2(direction * moveSpeed * 0.7f, rb.linearVelocity.y);
+        
+        // Keep facing the player while backing up
+        FacePlayer();
+    }
+    
+    void RetreatFromPlayer()
+{
+    float direction = transform.position.x > playerTransform.position.x ? 1 : -1;
+    
+    // Always use double speed when in retreat state
+    float retreatSpeedMultiplier = 2.0f; // Double speed
+    rb.linearVelocity = new Vector2(direction * moveSpeed * retreatSpeedMultiplier, rb.linearVelocity.y);
+    
+    // Face away from player when retreating
+    FaceDirection(direction);
+}
+
+    void FacePlayer()
+    {
+        float direction = transform.position.x > playerTransform.position.x ? -1 : 1;
+        FaceDirection(direction);
+    }
+    
+    void FaceDirection(float direction)
+    {
+        transform.localScale = new Vector3(Mathf.Sign(direction) * Mathf.Abs(transform.localScale.x), transform.localScale.y, transform.localScale.z);
+    }
+
+    private void UpdateAnimator()
+{
+    // Update animator based on state - handle missing parameters
+    animator.SetBool("canMove", canMove && currentState != CombatState.Attack);
+    
+    // Only set these parameters if they exist in the animator
+    if (HasAnimatorParameter("isCircling"))
+        animator.SetBool("isCircling", currentState == CombatState.CircleStrafe);
+        
+    if (HasAnimatorParameter("isObserving"))
+        animator.SetBool("isObserving", currentState == CombatState.WaitAndObserve);
+        
+    if (HasAnimatorParameter("isRetreating"))
+        animator.SetBool("isRetreating", currentState == CombatState.Retreat || currentState == CombatState.BackupToIdealRange);
+        
+    animator.SetBool("Charging", isCharging);
+    
+    // Trigger attack animation when in attack state
+    if (currentState == CombatState.Attack && !isPlayingAttackAnimation)
+    {
+        isPlayingAttackAnimation = true;
+        
+        // Reset other triggers to prevent animation conflicts
+        animator.ResetTrigger("feint");
+        animator.ResetTrigger("specialAttack");
+        animator.ResetTrigger("takeDamage");
+        
+        // Set attack trigger
+        animator.SetTrigger("attack");
+        
+        // Start coroutine to wait for attack completion
+        StartCoroutine(WaitForAttackAnimation());
+    }
+    
+    // Trigger feint animation if it exists
+    if (currentState == CombatState.FeintAttack && !isPlayingAttackAnimation)
+    {
+        if (HasAnimatorParameter("feint"))
+            animator.SetTrigger("feint");
+        else
+            animator.SetTrigger("attack"); // Fallback
+    }
+}
+
+private IEnumerator WaitForAttackAnimation()
+{
+    // Wait for the attack animation to complete
+    float attackDuration = 0.8f; // Adjust to match your animation length
+    yield return new WaitForSeconds(attackDuration);
+    
+    // Animation is done
+    isPlayingAttackAnimation = false;
+    
+    // If player is still detected, prepare for next attack with slight delay
+    if (detectionZone.detectedColliders.Count > 0 && !isFatigued)
+    {
+        yield return new WaitForSeconds(Random.Range(0.2f, 0.5f)); // Small random delay
+        
+        // Increment attack counter
+        consecutiveAttacks++;
+        if (consecutiveAttacks >= maxConsecutiveAttacks)
+        {
+            fatigueTimer = fatigueTime;
+            consecutiveAttacks = 0;
+            // When fatigued, back away
+            ChangeState(CombatState.Retreat);
+        }
+        else if (!isStaggering && !isPerformingHalfHealthAction && !isPerformingSomeAction)
+        {
+            // Randomly decide to attack again, feint, or circle
+            float decision = Random.value;
+            if (decision < 0.6f * aggressiveness)
+                ChangeState(CombatState.Attack);
+            else if (decision < 0.8f && HasAnimatorParameter("feint"))
+                ChangeState(CombatState.FeintAttack);
+            else
+                ChangeState(CombatState.CircleStrafe);
+        }
+    }
+    else if (!isStaggering && !isPerformingHalfHealthAction && !isPerformingSomeAction)
+    {
+        ChangeState(CombatState.CircleStrafe);
+    }
+}
+    
+    // Helper method to check if animator parameter exists
+    private bool HasAnimatorParameter(string paramName)
+    {
+        foreach (AnimatorControllerParameter param in animator.parameters)
+        {
+            if (param.name == paramName)
+                return true;
+        }
+        return false;
     }
 
     public void AttemptDealDamage()
@@ -243,21 +747,19 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
     }
 
     private void DealDamageToPlayer()
-{
-    if (HasTarget && playerHealth != null && Vector2.Distance(transform.position, playerHealth.transform.position) <= chaseDistanceAggro)
     {
-        bool damageApplied = playerHealth.TakeDamage(damage); // Capture return value
-
-        if (damageApplied)
+        if (HasTarget && playerHealth != null && Vector2.Distance(transform.position, playerHealth.transform.position) <= chaseDistanceAggro)
         {
-            hitSoundSource?.Play(); // Play ElfSwordsman's hit sound
-            SetAggro(true); // Aggro when player takes damage within chase distance aggro
-            isChasing = true; // Start chasing
-        }
-        // No action needed if attack was evaded
-    }
-}
+            bool damageApplied = playerHealth.TakeDamage(damage);
 
+            if (damageApplied)
+            {
+                hitSoundSource?.Play();
+                SetAggro(true);
+                isChasing = true;
+            }
+        }
+    }
 
     public void OnEveryDamageTaken()
     {
@@ -267,12 +769,20 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
             SetAggro(true);
         }
         StartCoroutine(HandleStagger());
+        
+        // Chance to counter-attack after stagger
+        if (Random.value < counterAttackChance && !isFatigued)
+        {
+            StartCoroutine(PrepareCounterAttack());
+        }
     }
 
     private IEnumerator HandleStagger()
     {
         canMove = false;
         isStaggering = true;
+        isAttacking = false; // Interrupt any attacks
+        currentState = CombatState.Staggered;
         animator.SetBool("canMove", false);
         rb.linearVelocity = Vector2.zero;
         animator.SetTrigger("takeDamage");
@@ -282,6 +792,26 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
         animator.SetBool("canMove", true);
         canMove = true;
         isStaggering = false;
+        ChangeState(CombatState.CircleStrafe);
+    }
+    
+    private IEnumerator PrepareCounterAttack()
+    {
+        // Wait for stagger to finish
+        while (isStaggering)
+        {
+            yield return null;
+        }
+        
+        // Counter with an appropriate action
+        if (Random.value < 0.5f)
+        {
+            ChangeState(CombatState.Attack);
+        }
+        else
+        {
+            ChangeState(CombatState.Charge);
+        }
     }
 
     public void OnSomeDamageTaken()
@@ -302,14 +832,14 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
         isPerformingSomeAction = true;
         canMove = false;
         isChasing = false;
+        isAttacking = false; // Interrupt any attacks
         animator.SetBool("canMove", false);
 
         isCharging = true;
         animator.SetBool("Charging", true);
 
         chargeDirectionFacing = transform.position.x > playerTransform.position.x ? -1 : 1;
-
-        transform.localScale = new Vector3(chargeDirectionFacing * Mathf.Abs(transform.localScale.x), transform.localScale.y, transform.localScale.z);
+        FaceDirection(chargeDirectionFacing);
 
         rb.linearVelocity = new Vector2(chargeDirectionFacing * chargeSpeed, rb.linearVelocity.y);
 
@@ -326,6 +856,54 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
         animator.SetBool("canMove", true);
         isChasing = true;
         isPerformingSomeAction = false;
+        ChangeState(CombatState.CircleStrafe);
+    }
+    
+    private IEnumerator PerformCharge()
+    {
+        isCharging = true;
+        canMove = false;
+        isAttacking = false; // Make sure we're not in attack state
+        animator.SetBool("canMove", false);
+        animator.SetBool("Charging", true);
+        
+        // Telegraph the charge
+        if (HasAnimatorParameter("chargeUp"))
+            animator.SetTrigger("chargeUp");
+            
+        yield return new WaitForSeconds(0.5f);
+        
+        // Calculate charge direction
+        chargeDirectionFacing = transform.position.x > playerTransform.position.x ? -1 : 1;
+        FaceDirection(chargeDirectionFacing);
+        
+        // Charge forward rapidly
+        float chargeTime = 0f;
+        float chargeDur = chargeDuration;
+        
+        while (chargeTime < chargeDur)
+        {
+            rb.linearVelocity = new Vector2(chargeDirectionFacing * chargeSpeed, rb.linearVelocity.y);
+            chargeTime += Time.deltaTime;
+            yield return null;
+        }
+        
+        // Attack at the end of charge
+        rb.linearVelocity = Vector2.zero;
+        animator.SetTrigger("attack");
+        isAttacking = true;
+        
+        yield return new WaitForSeconds(0.8f); // Wait longer to ensure attack completes
+        
+        // Reset state
+        isCharging = false;
+        isAttacking = false;
+        canMove = true;
+        animator.SetBool("Charging", false);
+        animator.SetBool("canMove", true);
+        
+        // Return to appropriate state
+        ChangeState(CombatState.CircleStrafe);
     }
 
     public bool _hasTarget = false;
@@ -358,12 +936,15 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
     {
         isBehaviorDisabled = true;
         isChasing = false;
+        isAttacking = false; // Stop any attacks
         SetAggro(false);
+        currentState = CombatState.Disabled;
 
         yield return new WaitForSeconds(duration);
 
         isBehaviorDisabled = false;
         playerOnHead = false;
+        ChangeState(CombatState.Patrol);
     }
 
     void OnDrawGizmos()
@@ -374,6 +955,10 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
 
         Gizmos.color = Color.red;
         Gizmos.DrawWireSphere(transform.position, chaseDistanceAggro);
+        
+        // Draw ideal combat distance
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireSphere(transform.position, idealCombatDistance);
     }
 
     private void HandleHalfHealthAction()
@@ -391,78 +976,118 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
                 }
             }
         }
-
-        if (actionCooldownTimer > 0f)
-        {
-            actionCooldownTimer -= Time.deltaTime;
-        }
     }
-
+    
     private IEnumerator PerformHalfHealthAction()
     {
         isPerformingHalfHealthAction = true;
         canMove = false;
         isChasing = false;
+        isAttacking = false; // Stop any attacks in progress
+        currentState = CombatState.HalfHealthAction;
         animator.SetBool("canMove", false);
 
+        // First back away slightly
+        float backDirection = transform.position.x > playerTransform.position.x ? 1 : -1;
+        rb.linearVelocity = new Vector2(backDirection * moveSpeed * 0.7f, rb.linearVelocity.y);
+        yield return new WaitForSeconds(0.5f);
+        
+        // Charge up (visual telegraph)
+        if (HasAnimatorParameter("chargeUp"))
+            animator.SetTrigger("chargeUp");
+        yield return new WaitForSeconds(0.7f);
+
+        // Perform a series of rapid attacks with high movement
         isCharging = true;
         animator.SetBool("Charging", true);
 
+        // Calculate initial charge direction toward player
         chargeDirectionFacing = transform.position.x > playerTransform.position.x ? -1 : 1;
+        FaceDirection(chargeDirectionFacing);
 
-        transform.localScale = new Vector3(chargeDirectionFacing * Mathf.Abs(transform.localScale.x), transform.localScale.y, transform.localScale.z);
-
-        rb.linearVelocity = new Vector2(chargeDirectionFacing * chargeSpeed, rb.linearVelocity.y);
-
-        yield return new WaitForSeconds(chargeDuration);
-
+        // First dash attack
+        rb.linearVelocity = new Vector2(chargeDirectionFacing * lungeSpeed, rb.linearVelocity.y);
+        yield return new WaitForSeconds(0.4f);
+        animator.SetTrigger("attack");
         rb.linearVelocity = Vector2.zero;
-
+        yield return new WaitForSeconds(0.3f);
+        
+        // Quick repositioning
+        chargeDirectionFacing *= -1; // Reverse direction
+        FaceDirection(chargeDirectionFacing);
+        rb.linearVelocity = new Vector2(chargeDirectionFacing * moveSpeed * 1.5f, rb.linearVelocity.y);
+        yield return new WaitForSeconds(0.5f);
+        
+        // Second attack from new angle
+        chargeDirectionFacing = transform.position.x > playerTransform.position.x ? -1 : 1;
+        FaceDirection(chargeDirectionFacing);
+        rb.linearVelocity = new Vector2(chargeDirectionFacing * lungeSpeed, rb.linearVelocity.y);
+        yield return new WaitForSeconds(0.3f);
+        animator.SetTrigger("attack");
+        
+        yield return new WaitForSeconds(0.4f);
+        
+        // Final powerful attack
+        rb.linearVelocity = Vector2.zero;
+        if (HasAnimatorParameter("specialAttack"))
+            animator.SetTrigger("specialAttack");
+        else
+            animator.SetTrigger("attack");
+            
+        yield return new WaitForSeconds(0.8f);
+        
+        // Reset state
         isCharging = false;
         animator.SetBool("Charging", false);
-
-        animator.SetTrigger("attack");
+        rb.linearVelocity = Vector2.zero;
 
         canMove = true;
         animator.SetBool("canMove", true);
-        isChasing = true;
         isPerformingHalfHealthAction = false;
+        ChangeState(CombatState.Retreat);
     }
-
+    
     // Implementation of IChaseZoneUser
     public void SetPlayerInChaseZone(bool isInZone)
-    {
-        isPlayerInChaseZone = isInZone;
-    }
-
-    // Implementation of IEnemyAggro
-    // Implementation of IEnemyAggro
-// Implementation of IEnemyAggro
-public void SetAggro(bool isAggro)
 {
-    aggro = isAggro;
-    UpdateLayerBasedOnAggro(); // Ensure layer is updated immediately
-
-    // Change the ChaseZone's layer based on the aggro state
-    if (chaseZone != null)
+    isPlayerInChaseZone = isInZone;
+    
+    // Only trigger attack if we're not already attacking
+    if (isInZone && HasTarget && !isFatigued && !isPlayingAttackAnimation && 
+        currentState != CombatState.Attack && 
+        currentState != CombatState.Staggered && 
+        currentState != CombatState.Disabled && 
+        currentState != CombatState.HalfHealthAction && 
+        currentState != CombatState.SpecialAction)
     {
-        chaseZone.gameObject.layer = aggro ? LayerMask.NameToLayer("EnemyHitboxAggro") : LayerMask.NameToLayer("EnemyHitbox");
-    }
-
-    // Change the DetectionZone's layer based on the aggro state
-    if (detectionZone != null)
-    {
-        detectionZone.gameObject.layer = aggro ? LayerMask.NameToLayer("EnemyHitboxAggro") : LayerMask.NameToLayer("EnemyHitbox");
-    }
-
-    // Change the SwordAttack's layer based on the aggro state
-    if (swordAttackZone != null)
-    {
-        swordAttackZone.gameObject.layer = aggro ? LayerMask.NameToLayer("EnemyHitboxAggro") : LayerMask.NameToLayer("EnemyHitbox");
+        ChangeState(CombatState.Attack);
     }
 }
 
+    // Implementation of IEnemyAggro
+    public void SetAggro(bool isAggro)
+    {
+        aggro = isAggro;
+        UpdateLayerBasedOnAggro(); // Ensure layer is updated immediately
 
+        // Change the ChaseZone's layer based on the aggro state
+        if (chaseZone != null)
+        {
+            chaseZone.gameObject.layer = aggro ? LayerMask.NameToLayer("EnemyHitboxAggro") : LayerMask.NameToLayer("EnemyHitbox");
+        }
+
+        // Change the DetectionZone's layer based on the aggro state
+        if (detectionZone != null)
+        {
+            detectionZone.gameObject.layer = aggro ? LayerMask.NameToLayer("EnemyHitboxAggro") : LayerMask.NameToLayer("EnemyHitbox");
+        }
+
+        // Change the SwordAttack's layer based on the aggro state
+        if (swordAttackZone != null)
+        {
+            swordAttackZone.gameObject.layer = aggro ? LayerMask.NameToLayer("EnemyHitboxAggro") : LayerMask.NameToLayer("EnemyHitbox");
+        }
+    }
 
     public bool IsAggroed
     {

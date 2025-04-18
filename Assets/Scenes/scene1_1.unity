@@ -231,6 +231,30 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 475823802}
     m_Modifications:
+    - target: {fileID: 827349482909304137, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
+      propertyPath: m_Size.x
+      value: 6.640007
+      objectReference: {fileID: 0}
+    - target: {fileID: 827349482909304137, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
+      propertyPath: m_Offset.x
+      value: 2.3186302
+      objectReference: {fileID: 0}
+    - target: {fileID: 1419492946091408193, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
+      propertyPath: aggressiveness
+      value: 0.8
+      objectReference: {fileID: 0}
+    - target: {fileID: 1419492946091408193, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
+      propertyPath: unpredictability
+      value: 0.8
+      objectReference: {fileID: 0}
+    - target: {fileID: 1419492946091408193, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
+      propertyPath: maxRetreatDistance
+      value: 4
+      objectReference: {fileID: 0}
+    - target: {fileID: 1419492946091408193, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
+      propertyPath: maxRetreatDuration
+      value: 1.5
+      objectReference: {fileID: 0}
     - target: {fileID: 1419492946091408193, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
       propertyPath: 'patrolPoints.Array.data[0]'
       value: 
@@ -8560,7 +8584,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 7727505174786697323, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
       propertyPath: m_IsActive
-      value: 1
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 8600151497936582969, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
       propertyPath: enemyID
