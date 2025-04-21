@@ -100,7 +100,7 @@ public class Bush : MonoBehaviour
         {
             player.SetTransparency(player.normalAlpha);
             player.SetLayerOverride("Player"); // Revert to default layer
-            Debug.Log("Player exited bush. Transparency and layer reset to normal.");
+           // Debug.Log("Player exited bush. Transparency and layer reset to normal.");
         }
         else
         {

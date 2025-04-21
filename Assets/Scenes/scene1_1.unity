@@ -233,19 +233,27 @@ PrefabInstance:
     m_Modifications:
     - target: {fileID: 827349482909304137, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
       propertyPath: m_Size.x
-      value: 6.640007
+      value: 7.822937
       objectReference: {fileID: 0}
     - target: {fileID: 827349482909304137, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
       propertyPath: m_Offset.x
-      value: 2.3186302
+      value: 2.9100952
+      objectReference: {fileID: 0}
+    - target: {fileID: 1419492946091408193, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
+      propertyPath: defensiveness
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 1419492946091408193, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
       propertyPath: aggressiveness
-      value: 0.8
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 1419492946091408193, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
+      propertyPath: backupDistance
+      value: 0.1
       objectReference: {fileID: 0}
     - target: {fileID: 1419492946091408193, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
       propertyPath: unpredictability
-      value: 0.8
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 1419492946091408193, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
       propertyPath: maxRetreatDistance
@@ -254,6 +262,14 @@ PrefabInstance:
     - target: {fileID: 1419492946091408193, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
       propertyPath: maxRetreatDuration
       value: 1.5
+      objectReference: {fileID: 0}
+    - target: {fileID: 1419492946091408193, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
+      propertyPath: idealCombatDistance
+      value: 7
+      objectReference: {fileID: 0}
+    - target: {fileID: 1419492946091408193, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
+      propertyPath: retreatSpeedMultiplier
+      value: 2
       objectReference: {fileID: 0}
     - target: {fileID: 1419492946091408193, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
       propertyPath: 'patrolPoints.Array.data[0]'
@@ -309,7 +325,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 7727505174786697323, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
       propertyPath: m_IsActive
-      value: 1
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 8600151497936582969, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
       propertyPath: enemyID
@@ -6793,11 +6809,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 3485107052193799996, guid: 156605f5bbc0881449db8de594b72665, type: 3}
       propertyPath: m_IsActive
-      value: 0
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 4879884693907117967, guid: 156605f5bbc0881449db8de594b72665, type: 3}
       propertyPath: stealthAlpha
-      value: 0.1
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 4879884693907117967, guid: 156605f5bbc0881449db8de594b72665, type: 3}
       propertyPath: 'patrolPoints.Array.data[0]'
@@ -6854,7 +6870,13 @@ PrefabInstance:
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
-    m_AddedComponents: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 3485107052193799996, guid: 156605f5bbc0881449db8de594b72665, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 1748473402}
+    - targetCorrespondingSourceObject: {fileID: 3485107052193799996, guid: 156605f5bbc0881449db8de594b72665, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 1748473401}
   m_SourcePrefab: {fileID: 100100000, guid: 156605f5bbc0881449db8de594b72665, type: 3}
 --- !u!1001 &1438409908
 PrefabInstance:
@@ -6872,6 +6894,10 @@ PrefabInstance:
       propertyPath: healthBarFill
       value: 
       objectReference: {fileID: 149025051}
+    - target: {fileID: 2990189390275352935, guid: eb6e6433b892e31469182338534be336, type: 3}
+      propertyPath: m_ExcludeLayers.m_Bits
+      value: 526336
+      objectReference: {fileID: 0}
     - target: {fileID: 3709659411225870925, guid: eb6e6433b892e31469182338534be336, type: 3}
       propertyPath: m_LocalPosition.x
       value: -208.14
@@ -8055,6 +8081,63 @@ Transform:
   - {fileID: 275821038}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1748473389 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 3485107052193799996, guid: 156605f5bbc0881449db8de594b72665, type: 3}
+  m_PrefabInstance: {fileID: 1432507744}
+  m_PrefabAsset: {fileID: 0}
+--- !u!212 &1748473399 stripped
+SpriteRenderer:
+  m_CorrespondingSourceObject: {fileID: 1295285716997760206, guid: 156605f5bbc0881449db8de594b72665, type: 3}
+  m_PrefabInstance: {fileID: 1432507744}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &1748473401
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1748473389}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1a6ae82b111cf664ba2b744b23892354, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  colorSchemeGroups: []
+  randomizeOnAwake: 1
+  randomSeed: -1
+--- !u!114 &1748473402
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1748473389}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5f34946fed1dc734a96c458084e857e8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  targetRenderer: {fileID: 1748473399}
+  colorSwapMaterial: {fileID: 2100000, guid: ae03593b7c41d7f4183b7eb2197ac881, type: 2}
+  applyOnStart: 1
+  colorSwaps:
+  - name: 1
+    originalColor: {r: 0.19215688, g: 0.19607845, b: 0.20000002, a: 0}
+    targetColor: {r: 0.15294118, g: 0.45882356, b: 0.10196079, a: 1}
+  - name: 2
+    originalColor: {r: 0.48627454, g: 0.4901961, b: 0.49411768, a: 0}
+    targetColor: {r: 0.10196078, g: 0.45882353, b: 0.12720294, a: 1}
+  - name: 3
+    originalColor: {r: 0.19215688, g: 0.19607845, b: 0.20000002, a: 0}
+    targetColor: {r: 0.24448201, g: 0.7735849, b: 0.27936798, a: 0}
+  - name: 4
+    originalColor: {r: 0.1254902, g: 0.1254902, b: 0.1254902, a: 0}
+    targetColor: {r: 0.18039216, g: 0.5803922, b: 0.20392159, a: 1}
+  - name: 5
+    originalColor: {r: 0.30588236, g: 0.30980393, b: 0.3137255, a: 0}
+    targetColor: {r: 0.13705944, g: 0.8301887, b: 0.17783178, a: 1}
+  colorThreshold: 0.01
 --- !u!1001 &1749048537
 PrefabInstance:
   m_ObjectHideFlags: 0
