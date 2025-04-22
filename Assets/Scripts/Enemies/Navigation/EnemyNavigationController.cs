@@ -116,9 +116,17 @@ namespace Enemies.Navigation
         }
     }
 
-    // Configure components to use the transforms
+    // Modify ground layer mask to exclude the enemy's own layers
+    int excludeEnemyLayers = ~(1 << LayerMask.NameToLayer("EnemyHitbox"));
+    LayerMask modifiedGroundLayer = groundLayer & excludeEnemyLayers;
+    
+    // Log the layer masks for debugging
+    Debug.Log($"Original ground layer: {LayerMaskToString(groundLayer)}, " +
+              $"Modified ground layer: {LayerMaskToString(modifiedGroundLayer)}");
+
+    // Configure components to use the transforms and modified layer mask
     obstacleDetector.Initialize(transform, groundCheck, wallCheck, 
-        obstacleDetectionDistance, edgeDetectionDistance, groundLayer, obstacleLayer);
+        obstacleDetectionDistance, edgeDetectionDistance, modifiedGroundLayer, obstacleLayer);
     
     jumpController.Initialize(rb, animator, jumpForce, maxJumpDistance);
     
@@ -134,35 +142,54 @@ namespace Enemies.Navigation
         }
     }
 }
+// Helper method to convert layer mask to readable string
+private string LayerMaskToString(LayerMask mask)
+{
+    string result = "";
+    for (int i = 0; i < 32; i++)
+    {
+        if (((1 << i) & mask.value) != 0)
+        {
+            result += (result.Length > 0 ? ", " : "") + LayerMask.LayerToName(i);
+        }
+    }
+    return string.IsNullOrEmpty(result) ? "Nothing" : result + $" ({mask.value})";
+}
         // Added method for easier setup from other scripts
         public void SetupReferences(Animator anim, Transform ground, Transform wall, Transform ladder, 
-                                   LayerMask groundLayerMask, LayerMask obstacleLayerMask, LayerMask ladderLayerMask)
-        {
-            animator = anim;
-            groundCheck = ground;
-            wallCheck = wall;
-            ladderCheck = ladder;
-            groundLayer = groundLayerMask;
-            obstacleLayer = obstacleLayerMask;
-            ladderLayer = ladderLayerMask;
-            
-            // Re-initialize components with new references
-            if (obstacleDetector != null)
-            {
-                obstacleDetector.Initialize(transform, groundCheck, wallCheck, 
-                    obstacleDetectionDistance, edgeDetectionDistance, groundLayer, obstacleLayer);
-            }
-            
-            if (jumpController != null)
-            {
-                jumpController.Initialize(rb, animator, jumpForce, maxJumpDistance);
-            }
-            
-            if (climbController != null)
-            {
-                climbController.Initialize(rb, animator, ladderCheck, climbSpeed, ladderLayer, ladderCheckRadius);
-            }
-        }
+                          LayerMask groundLayerMask, LayerMask obstacleLayerMask, LayerMask ladderLayerMask)
+{
+    animator = anim;
+    groundCheck = ground;
+    wallCheck = wall;
+    ladderCheck = ladder;
+    
+    // Store the original masks
+    groundLayer = groundLayerMask;
+    obstacleLayer = obstacleLayerMask;
+    ladderLayer = ladderLayerMask;
+    
+    // Modify ground layer mask to exclude the enemy's own layers
+    int excludeEnemyLayers = ~(1 << LayerMask.NameToLayer("EnemyHitbox"));
+    LayerMask modifiedGroundLayer = groundLayerMask & excludeEnemyLayers;
+    
+    // Re-initialize components with new references
+    if (obstacleDetector != null)
+    {
+        obstacleDetector.Initialize(transform, groundCheck, wallCheck, 
+            obstacleDetectionDistance, edgeDetectionDistance, modifiedGroundLayer, obstacleLayer);
+    }
+    
+    if (jumpController != null)
+    {
+        jumpController.Initialize(rb, animator, jumpForce, maxJumpDistance);
+    }
+    
+    if (climbController != null)
+    {
+        climbController.Initialize(rb, animator, ladderCheck, climbSpeed, ladderLayer, ladderCheckRadius);
+    }
+}
 
         // Additional method to set movement parameters
         public void SetMovementParameters(float move, float climb, float jump, float maxJump)

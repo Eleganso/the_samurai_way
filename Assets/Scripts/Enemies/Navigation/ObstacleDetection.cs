@@ -30,95 +30,52 @@ public class ObstacleDetection : MonoBehaviour
 
     public bool IsGrounded()
 {
-    // Override for testing - uncomment to force grounded state
-    // return true;
-
-    // Validate parameters
-    if (groundLayer.value == 0)
+    // First, check if we're directly standing on actual ground
+    if (groundCheckTransform != null)
     {
-        Debug.LogError("Ground layer mask is zero! Please set the correct layer in the inspector.");
-        return false;
-    }
-
-    if (groundCheckTransform == null)
-    {
-        // Calculate a position below the entity's feet
-        Vector2 feetPosition = (Vector2)enemyTransform.position + new Vector2(0, -0.75f);
-        bool grounded = Physics2D.OverlapCircle(feetPosition, 0.5f, groundLayer);
-        
-        Debug.DrawRay(feetPosition, Vector2.down * 0.2f, grounded ? Color.green : Color.red);
-        return grounded;
-    }
-    
-    // APPROACH 1: Try a very wide radius to ensure detection
-    float radius = 0.8f; // Increased radius for better detection
-    bool isGroundedWithTransform = Physics2D.OverlapCircle(groundCheckTransform.position, radius, groundLayer);
-    
-    // APPROACH 2: If that fails, try multiple detection points spread horizontally
-    if (!isGroundedWithTransform)
-    {
-        // Try multiple points along a horizontal line
-        for (float offset = -0.5f; offset <= 0.5f; offset += 0.25f)
-        {
-            Vector2 checkPos = (Vector2)groundCheckTransform.position + new Vector2(offset, 0);
-            isGroundedWithTransform = Physics2D.OverlapCircle(checkPos, 0.3f, groundLayer);
-            
-            if (isGroundedWithTransform)
-            {
-                Debug.DrawRay(checkPos, Vector2.down * 0.3f, Color.green);
-                break;
-            }
-        }
-    }
-    
-    // APPROACH 3: Try ignoring layers and check all colliders below
-    if (!isGroundedWithTransform)
-    {
-        // Cast against everything, then check if what we hit is ground
+        // Cast a ray directly downward with a short distance
         RaycastHit2D hit = Physics2D.Raycast(
-            groundCheckTransform.position, 
-            Vector2.down, 
-            0.75f
+            groundCheckTransform.position,
+            Vector2.down,
+            0.3f,  // Short distance to check just below feet
+            groundLayer
         );
         
-        if (hit.collider != null)
+        // If we hit something on the ground layer that's not our own collider
+        if (hit.collider != null && 
+            hit.collider.transform != enemyTransform && 
+            !hit.collider.transform.IsChildOf(enemyTransform))
         {
-            // Check if the hit object is on the ground layer
-            if ((groundLayer.value & (1 << hit.collider.gameObject.layer)) != 0)
-            {
-                isGroundedWithTransform = true;
-                Debug.Log($"Ground detected using raycast: {hit.collider.name} on layer {LayerMask.LayerToName(hit.collider.gameObject.layer)}");
-            }
-            else
-            {
-                // Log what we hit, even if it's not ground
-                Debug.Log($"Hit {hit.collider.name} on layer {LayerMask.LayerToName(hit.collider.gameObject.layer)} but it's not on Ground layer");
-            }
+//            Debug.Log($"Ground detected using raycast: {hit.collider.name} on layer {LayerMask.LayerToName(hit.collider.gameObject.layer)}");
+            return true;
         }
     }
     
-    // Visual debugging
-    Color debugColor = isGroundedWithTransform ? Color.green : Color.red;
-    Debug.DrawRay(groundCheckTransform.position, Vector2.down * 0.5f, debugColor);
+    // If first method fails, use the overlap approach but ONLY check for specific ground colliders
+    Collider2D[] colliders = Physics2D.OverlapCircleAll(
+        groundCheckTransform.position, 
+        0.3f  // Smaller radius to avoid detecting too far
+    );
     
-    if (!isGroundedWithTransform && Time.frameCount % 60 == 0) // Limit log frequency
+    foreach (Collider2D col in colliders)
     {
-        // Get all nearby colliders for debugging
-        Collider2D[] colliders = Physics2D.OverlapCircleAll(groundCheckTransform.position, 1.0f);
-        string nearbyColliders = "";
-        foreach (var collider in colliders)
-        {
-            nearbyColliders += $"{collider.name} (Layer: {LayerMask.LayerToName(collider.gameObject.layer)}), ";
-        }
+        // Skip if it's the enemy itself or a trigger
+        if (col.transform == enemyTransform || 
+            col.transform.IsChildOf(enemyTransform) || 
+            col.isTrigger)
+            continue;
         
-        Debug.Log($"Not grounded at GroundCheck position: {groundCheckTransform.position}, " +
-                  $"Looking for Layer: {LayerMaskToLayerName(groundLayer)}. " +
-                  $"Nearby colliders: {nearbyColliders}");
+        // Only accept ground layer objects
+        if ((groundLayer.value & (1 << col.gameObject.layer)) != 0)
+        {
+            Debug.DrawLine(groundCheckTransform.position, col.transform.position, Color.green);
+            return true;
+        }
     }
     
-    return isGroundedWithTransform;
+    // No valid ground found
+    return false;
 }
-    
     // Helper method to convert layer mask to readable layer name
 private string LayerMaskToLayerName(LayerMask layerMask)
 {
@@ -135,29 +92,46 @@ private string LayerMaskToLayerName(LayerMask layerMask)
 }
 
     public bool IsObstacleAhead(bool isFacingRight)
+{
+    Vector2 direction = isFacingRight ? Vector2.right : Vector2.left;
+    Vector2 origin;
+    
+    if (wallCheckTransform != null)
     {
-        Vector2 direction = isFacingRight ? Vector2.right : Vector2.left;
-        Vector2 origin;
-        
-        if (wallCheckTransform != null)
-        {
-            // Use the WallCheck transform
-            origin = wallCheckTransform.position;
-        }
-        else
-        {
-            // Fallback to a calculated position
-            origin = (Vector2)enemyTransform.position + new Vector2(isFacingRight ? 0.25f : -0.25f, 0);
-        }
-        
-        RaycastHit2D hit = Physics2D.Raycast(origin, direction, obstacleDetectionDistance, obstacleLayer);
-        
-        // Visual debugging
-        Debug.DrawRay(origin, direction * obstacleDetectionDistance, hit.collider != null ? Color.red : Color.green);
-        
-        return hit.collider != null;
+        // Use the WallCheck transform
+        origin = wallCheckTransform.position;
     }
-
+    else
+    {
+        // Fallback to a calculated position
+        origin = (Vector2)enemyTransform.position + new Vector2(isFacingRight ? 0.25f : -0.25f, 0);
+    }
+    
+    // Cast a ray to detect obstacles
+    RaycastHit2D hit = Physics2D.Raycast(origin, direction, obstacleDetectionDistance, obstacleLayer);
+    
+    // Make sure we're not detecting our own colliders
+    if (hit.collider != null)
+    {
+        if (hit.collider.transform == enemyTransform || hit.collider.transform.IsChildOf(enemyTransform))
+        {
+            // Don't consider our own colliders as obstacles
+            Debug.Log($"Detected own collider as obstacle: {hit.collider.name}, ignoring it");
+            // Visual debugging
+            Debug.DrawRay(origin, direction * obstacleDetectionDistance, Color.blue);
+            return false;
+        }
+        
+        // Valid obstacle detected
+        Debug.Log($"Obstacle detected: {hit.collider.name} on layer {LayerMask.LayerToName(hit.collider.gameObject.layer)}");
+        Debug.DrawRay(origin, direction * hit.distance, Color.red);
+        return true;
+    }
+    
+    // No obstacle
+    Debug.DrawRay(origin, direction * obstacleDetectionDistance, Color.green);
+    return false;
+}
     public bool IsEdgeAhead(bool isFacingRight)
     {
         if (groundCheckTransform == null) return false;
@@ -183,40 +157,49 @@ private string LayerMaskToLayerName(LayerMask layerMask)
     }
 
     public float GetObstacleHeight(bool isFacingRight)
+{
+    Vector2 direction = isFacingRight ? Vector2.right : Vector2.left;
+    Vector2 origin = wallCheckTransform != null ? 
+                    (Vector2)wallCheckTransform.position : 
+                    (Vector2)enemyTransform.position + new Vector2(0, 0.5f);
+    
+    // Cast rays at different heights to find the top of the obstacle
+    for (int i = 0; i < jumpHeightOffsets.Length; i++)
     {
-        Vector2 direction = isFacingRight ? Vector2.right : Vector2.left;
-        Vector2 origin = wallCheckTransform != null ? 
-                        (Vector2)wallCheckTransform.position : 
-                        (Vector2)enemyTransform.position + new Vector2(0, 0.5f);
+        Vector2 rayOrigin = origin + new Vector2(0, jumpHeightOffsets[i]);
+        jumpHeightResults[i] = Physics2D.Raycast(
+            rayOrigin,
+            direction,
+            obstacleDetectionDistance,
+            obstacleLayer
+        );
         
-        // Cast rays at different heights to find the top of the obstacle
-        for (int i = 0; i < jumpHeightOffsets.Length; i++)
+        // Skip our own colliders
+        if (jumpHeightResults[i].collider != null && 
+            (jumpHeightResults[i].collider.transform == enemyTransform || 
+            jumpHeightResults[i].collider.transform.IsChildOf(enemyTransform)))
         {
-            Vector2 rayOrigin = origin + new Vector2(0, jumpHeightOffsets[i]);
-            jumpHeightResults[i] = Physics2D.Raycast(
-                rayOrigin,
-                direction,
-                obstacleDetectionDistance,
-                obstacleLayer
-            );
-            
-            // Visual debugging
-            Debug.DrawRay(rayOrigin, direction * obstacleDetectionDistance, 
-                jumpHeightResults[i].collider != null ? Color.red : Color.green);
+            jumpHeightResults[i] = new RaycastHit2D();  // Clear the result
         }
         
-        // Find the highest point that has no obstacle
-        for (int i = jumpHeightOffsets.Length - 1; i >= 0; i--)
-        {
-            if (jumpHeightResults[i].collider == null)
-            {
-                return jumpHeightOffsets[i];
-            }
-        }
-        
-        return 0; // Can't jump over this obstacle
+        // Visual debugging
+        Debug.DrawRay(rayOrigin, direction * obstacleDetectionDistance, 
+            jumpHeightResults[i].collider != null ? Color.red : Color.green);
     }
-
+    
+    // Find the highest point that has no obstacle
+    for (int i = jumpHeightOffsets.Length - 1; i >= 0; i--)
+    {
+        if (jumpHeightResults[i].collider == null)
+        {
+            Debug.Log($"Found clear jump height at offset {jumpHeightOffsets[i]}");
+            return jumpHeightOffsets[i];
+        }
+    }
+    
+    Debug.Log("Cannot jump over this obstacle");
+    return 0; // Can't jump over this obstacle
+}
     public float GetEdgeDistance(bool isFacingRight)
     {
         if (groundCheckTransform == null) return 0;
