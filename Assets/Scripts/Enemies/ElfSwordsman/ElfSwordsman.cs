@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using Enemies.Navigation;
 
 public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemyAggro
 {
@@ -18,6 +19,7 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
     private Player player;
     private PlayerHealth playerHealth;
     private EnemyHealth enemyHealth;
+    private EnemyNavigationController navigationController;
 
     [Header("Settings")]
     [SerializeField] private float moveSpeed = 3f;
@@ -27,6 +29,12 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
     [SerializeField] private float staggerTimer = 1f;
     [SerializeField] private float disableDuration = 2.5f;
     [SerializeField] private float disableMoveSpeed = 1f;
+
+    [Header("Navigation Settings")]
+    [SerializeField] private float jumpForce = 8f;
+    [SerializeField] private float climbSpeed = 2f;
+    [SerializeField] private float maxJumpDistance = 3f;
+    [SerializeField] private bool useNavigationSystem = true;
 
     private int patrolDestination = 0;
     private bool isChasing = false;
@@ -89,16 +97,76 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
         {
             Debug.LogError("ChaseZone not found. Please ensure the ChaseZone script is attached to a child object.");
         }
+        
+        // Get or add reference to navigation controller
+        navigationController = GetComponent<EnemyNavigationController>();
+        if (navigationController == null && useNavigationSystem)
+        {
+            // Add the navigation controller
+            navigationController = gameObject.AddComponent<EnemyNavigationController>();
+            Debug.Log("EnemyNavigationController added to " + gameObject.name);
+            
+            // Create check points if they don't exist
+            Transform groundCheck = transform.Find("GroundCheck");
+            if (groundCheck == null)
+            {
+                groundCheck = new GameObject("GroundCheck").transform;
+                groundCheck.SetParent(transform);
+                groundCheck.localPosition = new Vector3(0, -0.5f, 0); // Position at feet
+            }
+            
+            Transform wallCheck = transform.Find("WallCheck");
+            if (wallCheck == null)
+            {
+                wallCheck = new GameObject("WallCheck").transform;
+                wallCheck.SetParent(transform);
+                wallCheck.localPosition = new Vector3(0.5f, 0, 0); // Position at mid-body
+            }
+            
+            Transform ladderCheck = transform.Find("LadderCheck");
+            if (ladderCheck == null)
+            {
+                ladderCheck = new GameObject("LadderCheck").transform;
+                ladderCheck.SetParent(transform);
+                ladderCheck.localPosition = new Vector3(0, 0.5f, 0); // Position at hands
+            }
+            
+            // Setup navigation component with reference to player transform
+            navigationController.SetupReferences(
+                animator,
+                groundCheck,
+                wallCheck,
+                ladderCheck,
+                LayerMask.GetMask("Ground"),
+                LayerMask.GetMask("Obstacle"),
+                LayerMask.GetMask("Ladder")
+            );
+            
+            // Set movement parameters
+            navigationController.SetMovementParameters(moveSpeed, climbSpeed, jumpForce, maxJumpDistance);
+            
+            // Set player as target
+            if (playerTransform != null)
+            {
+                navigationController.SetTarget(playerTransform);
+            }
+        }
 
         aggro = false;
         previousAggroState = false;
         gameObject.layer = LayerMask.NameToLayer("Enemy");
     }
-
+    
     void Update()
     {
         if (isBehaviorDisabled || !canMove || isStaggering || isPerformingHalfHealthAction || isPerformingSomeAction || isCharging)
+        {
+            if (navigationController != null && useNavigationSystem)
+            {
+                navigationController.EnableNavigation(false);
+            }
             return;
+        }
 
         HasTarget = detectionZone.detectedColliders.Count > 0;
 
@@ -138,16 +206,34 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
             if (distanceToPlayer <= chaseDistanceAggro)
             {
                 isChasing = true;
+                
+                // Enable navigation system when chasing and aggro'd
+                if (navigationController != null && useNavigationSystem)
+                {
+                    navigationController.EnableNavigation(true);
+                }
             }
             else
             {
                 SetAggro(false);
                 isChasing = false;
+                
+                // Disable navigation when not chasing
+                if (navigationController != null && useNavigationSystem)
+                {
+                    navigationController.EnableNavigation(false);
+                }
             }
         }
         else
         {
             isChasing = false;
+            
+            // Disable navigation when not aggro'd
+            if (navigationController != null && useNavigationSystem)
+            {
+                navigationController.EnableNavigation(false);
+            }
         }
 
         UpdateLayerBasedOnAggro();
@@ -162,6 +248,14 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
 
     private void FixedUpdate()
     {
+        // Skip FixedUpdate movement logic if navigation system is handling it
+        if (navigationController != null && useNavigationSystem && aggro && !isBehaviorDisabled && 
+            !isPerformingHalfHealthAction && !isPerformingSomeAction && !playerOnHead)
+        {
+            return;
+        }
+        
+        // Original movement logic for when not using navigation system
         if (isBehaviorDisabled)
         {
             PatrolWithSpeed(disableMoveSpeed);
@@ -243,21 +337,20 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
     }
 
     private void DealDamageToPlayer()
-{
-    if (HasTarget && playerHealth != null && Vector2.Distance(transform.position, playerHealth.transform.position) <= chaseDistanceAggro)
     {
-        bool damageApplied = playerHealth.TakeDamage(damage); // Capture return value
-
-        if (damageApplied)
+        if (HasTarget && playerHealth != null && Vector2.Distance(transform.position, playerHealth.transform.position) <= chaseDistanceAggro)
         {
-            hitSoundSource?.Play(); // Play ElfSwordsman's hit sound
-            SetAggro(true); // Aggro when player takes damage within chase distance aggro
-            isChasing = true; // Start chasing
-        }
-        // No action needed if attack was evaded
-    }
-}
+            bool damageApplied = playerHealth.TakeDamage(damage); // Capture return value
 
+            if (damageApplied)
+            {
+                hitSoundSource?.Play(); // Play ElfSwordsman's hit sound
+                SetAggro(true); // Aggro when player takes damage within chase distance aggro
+                isChasing = true; // Start chasing
+            }
+            // No action needed if attack was evaded
+        }
+    }
 
     public void OnEveryDamageTaken()
     {
@@ -266,6 +359,13 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
         {
             SetAggro(true);
         }
+        
+        // Pause navigation during stagger
+        if (navigationController != null && useNavigationSystem)
+        {
+            navigationController.PauseNavigation(staggerTimer);
+        }
+        
         StartCoroutine(HandleStagger());
     }
 
@@ -303,6 +403,12 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
         canMove = false;
         isChasing = false;
         animator.SetBool("canMove", false);
+        
+        // Disable navigation during special action
+        if (navigationController != null && useNavigationSystem)
+        {
+            navigationController.EnableNavigation(false);
+        }
 
         isCharging = true;
         animator.SetBool("Charging", true);
@@ -326,6 +432,12 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
         animator.SetBool("canMove", true);
         isChasing = true;
         isPerformingSomeAction = false;
+        
+        // Re-enable navigation after special action if applicable
+        if (navigationController != null && useNavigationSystem && aggro)
+        {
+            navigationController.EnableNavigation(true);
+        }
     }
 
     public bool _hasTarget = false;
@@ -359,6 +471,12 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
         isBehaviorDisabled = true;
         isChasing = false;
         SetAggro(false);
+        
+        // Disable navigation when behavior is disabled
+        if (navigationController != null && useNavigationSystem)
+        {
+            navigationController.EnableNavigation(false);
+        }
 
         yield return new WaitForSeconds(duration);
 
@@ -404,6 +522,12 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
         canMove = false;
         isChasing = false;
         animator.SetBool("canMove", false);
+        
+        // Disable navigation during half health action
+        if (navigationController != null && useNavigationSystem)
+        {
+            navigationController.EnableNavigation(false);
+        }
 
         isCharging = true;
         animator.SetBool("Charging", true);
@@ -427,6 +551,12 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
         animator.SetBool("canMove", true);
         isChasing = true;
         isPerformingHalfHealthAction = false;
+        
+        // Re-enable navigation after half health action if applicable
+        if (navigationController != null && useNavigationSystem && aggro)
+        {
+            navigationController.EnableNavigation(true);
+        }
     }
 
     // Implementation of IChaseZoneUser
@@ -436,33 +566,35 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
     }
 
     // Implementation of IEnemyAggro
-    // Implementation of IEnemyAggro
-// Implementation of IEnemyAggro
-public void SetAggro(bool isAggro)
-{
-    aggro = isAggro;
-    UpdateLayerBasedOnAggro(); // Ensure layer is updated immediately
-
-    // Change the ChaseZone's layer based on the aggro state
-    if (chaseZone != null)
+    public void SetAggro(bool isAggro)
     {
-        chaseZone.gameObject.layer = aggro ? LayerMask.NameToLayer("EnemyHitboxAggro") : LayerMask.NameToLayer("EnemyHitbox");
+        aggro = isAggro;
+        UpdateLayerBasedOnAggro(); // Ensure layer is updated immediately
+        
+        // Update navigation system based on aggro state
+        if (navigationController != null && useNavigationSystem)
+        {
+            navigationController.EnableNavigation(isAggro);
+        }
+
+        // Change the ChaseZone's layer based on the aggro state
+        if (chaseZone != null)
+        {
+            chaseZone.gameObject.layer = aggro ? LayerMask.NameToLayer("EnemyHitboxAggro") : LayerMask.NameToLayer("EnemyHitbox");
+        }
+
+        // Change the DetectionZone's layer based on the aggro state
+        if (detectionZone != null)
+        {
+            detectionZone.gameObject.layer = aggro ? LayerMask.NameToLayer("EnemyHitboxAggro") : LayerMask.NameToLayer("EnemyHitbox");
+        }
+
+        // Change the SwordAttack's layer based on the aggro state
+        if (swordAttackZone != null)
+        {
+            swordAttackZone.gameObject.layer = aggro ? LayerMask.NameToLayer("EnemyHitboxAggro") : LayerMask.NameToLayer("EnemyHitbox");
+        }
     }
-
-    // Change the DetectionZone's layer based on the aggro state
-    if (detectionZone != null)
-    {
-        detectionZone.gameObject.layer = aggro ? LayerMask.NameToLayer("EnemyHitboxAggro") : LayerMask.NameToLayer("EnemyHitbox");
-    }
-
-    // Change the SwordAttack's layer based on the aggro state
-    if (swordAttackZone != null)
-    {
-        swordAttackZone.gameObject.layer = aggro ? LayerMask.NameToLayer("EnemyHitboxAggro") : LayerMask.NameToLayer("EnemyHitbox");
-    }
-}
-
-
 
     public bool IsAggroed
     {
