@@ -23,23 +23,30 @@ namespace Enemies.Navigation
         }
 
         public bool CanJumpOver(bool isFacingRight)
-        {
-            // Reference to the ObstacleDetection component
-            ObstacleDetection detector = GetComponent<ObstacleDetection>();
-            if (detector == null) return false;
-
-            // Get the height of the obstacle
-            float obstacleHeight = detector.GetObstacleHeight(isFacingRight);
-            
-            // Calculate maximum jump height using physics formula: h = v²/(2*g)
-            float gravity = Mathf.Abs(Physics2D.gravity.y);
-            float maxHeight = (jumpForce * jumpForce) / (2 * gravity * rb.gravityScale);
-            
-            // Add a small buffer for safety
-            maxHeight *= 0.8f;
-            
-            return maxHeight >= obstacleHeight;
-        }
+{
+    // Get the obstacle detection component
+    ObstacleDetection detector = GetComponent<ObstacleDetection>();
+    if (detector == null) return false;
+    
+    // Get the height of the obstacle
+    float obstacleHeight = detector.GetObstacleHeight(isFacingRight);
+    Debug.Log($"Obstacle height: {obstacleHeight}");
+    
+    // Calculate maximum jump height using physics formula: h = v²/(2*g)
+    float gravity = Mathf.Abs(Physics2D.gravity.y);
+    float maxHeight = (jumpForce * jumpForce) / (2 * gravity * rb.gravityScale);
+    
+    // Add a small buffer for safety (80% of theoretical max height)
+    maxHeight *= 0.8f;
+    
+    Debug.Log($"Max jump height: {maxHeight}, Required height: {obstacleHeight}");
+    
+    // Return true if we can jump over the obstacle
+    bool canJump = maxHeight >= obstacleHeight && obstacleHeight > 0;
+    Debug.Log($"Can jump over obstacle: {canJump}");
+    
+    return canJump;
+}
 
         public bool CanJumpAcross(bool isFacingRight)
         {

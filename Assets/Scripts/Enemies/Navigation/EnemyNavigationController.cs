@@ -344,24 +344,26 @@ private string LayerMaskToString(LayerMask mask)
                     break;
 
                 case NavigationState.Walking:
-                    if (shouldJump)
-                    {
-                        currentState = NavigationState.Jumping;
-                    }
-                    else if (shouldClimb)
-                    {
-                        currentState = NavigationState.Climbing;
-                    }
-                    else if (!isGrounded)
-                    {
-                        currentState = NavigationState.Falling;
-                    }
-                    else if (isObstacleAhead && !shouldJump && !shouldClimb)
-                    {
-                        currentState = NavigationState.PathPlanning;
-                        StartCoroutine(ReconsiderPath());
-                    }
-                    break;
+    if (shouldJump)
+    {
+        currentState = NavigationState.Jumping;
+        Debug.Log("Transitioning to jumping state to jump over obstacle");
+    }
+    else if (shouldClimb)
+    {
+        currentState = NavigationState.Climbing;
+    }
+    else if (!isGrounded)
+    {
+        currentState = NavigationState.Falling;
+    }
+    else if (isObstacleAhead && !shouldJump && !shouldClimb)
+    {
+        // Only plan a new path if we can't jump over the obstacle
+        currentState = NavigationState.PathPlanning;
+        StartCoroutine(ReconsiderPath());
+    }
+    break;
 
                 case NavigationState.Jumping:
                     if (isGrounded && !jumpController.IsJumping)
@@ -398,37 +400,24 @@ private string LayerMaskToString(LayerMask mask)
             }
         }
 
-        private bool ShouldJump()
+        // Add debug logging to ShouldJump
+private bool ShouldJump()
 {
-    // Only consider jumping if grounded - check with less frequent logging
     if (!isGrounded) 
     {
-        if (Time.frameCount % 60 == 0) // Only log once every 60 frames to reduce spam
-        {
-            Debug.Log("Not jumping: Not grounded");
-        }
+        Debug.Log("Not jumping: Not grounded");
         return false;
     }
 
-    // Jump if there's an obstacle ahead but we can jump over it
     if (isObstacleAhead && jumpController.CanJumpOver(isFacingRight))
     {
         Debug.Log("Should jump: Obstacle ahead that we can jump over");
         return true;
     }
-
-    // Jump if there's a gap ahead that we can jump across
-    if (isEdgeAhead && jumpController.CanJumpAcross(isFacingRight))
+    else if (isObstacleAhead)
     {
-        Debug.Log("Should jump: Edge ahead that we can jump across");
-        return true;
-    }
-
-    // Jump if target is above and no ladder is available
-    if (isTargetAbove && !isLadderDetected && Mathf.Abs(target.position.x - transform.position.x) < 1.5f)
-    {
-        Debug.Log("Should jump: Target is above us");
-        return true;
+        Debug.Log("Obstacle ahead but can't jump over it: " + 
+                  jumpController.CanJumpOver(isFacingRight));
     }
 
     return false;

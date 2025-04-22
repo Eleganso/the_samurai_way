@@ -23,6 +23,9 @@ namespace Enemies.Navigation
         [SerializeField] private bool forceGrounded = false;
         [SerializeField] private bool printGroundObjects = false;
         
+        [Header("Debug Actions")]
+        [SerializeField] private bool debugObstacles = false;
+        
         [Header("Colors")]
         [SerializeField] private Color groundedColor = Color.green;
         [SerializeField] private Color notGroundedColor = Color.red;
@@ -102,6 +105,13 @@ namespace Enemies.Navigation
             statusText = $"{stateStr}\n";
             statusText += $"Grounded: {isGrounded || forceGrounded}, Obstacle: {isObstacleDetected}\n";
             statusText += $"Grounded {(framesGrounded * 100.0f / totalFrames):F1}% of time";
+            
+            // Check if debug button was pressed
+            if (debugObstacles)
+            {
+                debugObstacles = false;
+                CheckObstacleDetection();
+            }
         }
         
         private void CheckGrounded()
@@ -207,12 +217,60 @@ namespace Enemies.Navigation
             
             Vector2 direction = isFacingRight ? Vector2.right : Vector2.left;
             RaycastHit2D hit = Physics2D.Raycast(wallCheck.position, direction, obstacleDetectionDistance, obstacleLayer);
+            
+            // Skip if it's our own collider
+            if (hit.collider != null && (hit.collider.transform == transform || hit.collider.transform.IsChildOf(transform)))
+            {
+                isObstacleDetected = false;
+                return;
+            }
+            
             isObstacleDetected = hit.collider != null;
             
             if (logToConsole && isObstacleDetected && Time.frameCount % 60 == 0)
             {
                 Debug.Log($"Obstacle detected: {hit.collider.name}, Layer: {LayerMaskToString(obstacleLayer)}");
             }
+        }
+        
+        public void CheckObstacleDetection()
+        {
+            if (wallCheck == null) return;
+            
+            Vector2 direction = isFacingRight ? Vector2.right : Vector2.left;
+            float obstacleDetectDist = obstacleDetectionDistance;
+            
+            // Get all colliders in detection area
+            Collider2D[] colliders = Physics2D.OverlapCircleAll(
+                wallCheck.position + (Vector3)(direction * (obstacleDetectDist / 2)), 
+                obstacleDetectDist / 2
+            );
+            
+            string colliderInfo = "Obstacles in detection area:";
+            bool foundObstacle = false;
+            
+            foreach (var col in colliders)
+            {
+                bool isOwnCollider = col.transform == transform || col.transform.IsChildOf(transform);
+                bool isObstacleLayer = (obstacleLayer.value & (1 << col.gameObject.layer)) != 0;
+                
+                string status = isOwnCollider ? " (OWN COLLIDER)" : 
+                               isObstacleLayer ? " (VALID OBSTACLE)" : " (NOT OBSTACLE LAYER)";
+                               
+                colliderInfo += $"\n- {col.name}{status} (Layer: {LayerMask.LayerToName(col.gameObject.layer)})";
+                
+                if (!isOwnCollider && isObstacleLayer && !col.isTrigger)
+                {
+                    foundObstacle = true;
+                }
+            }
+            
+            Debug.Log(colliderInfo);
+            Debug.Log($"Obstacle ahead: {foundObstacle}");
+            
+            // Visual debugging
+            Debug.DrawRay(wallCheck.position, direction * obstacleDetectDist, 
+                         foundObstacle ? obstacleColor : Color.green);
         }
         
         private string LayerMaskToString(LayerMask mask)
