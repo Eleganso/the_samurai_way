@@ -4,104 +4,100 @@ namespace Enemies.Navigation
 {
     public class JumpController : MonoBehaviour
     {
+        [Header("Jump Settings")]
+        [SerializeField] private float jumpForce = 8f;
+        [SerializeField] private float maxJumpDistance = 3f;
+        [SerializeField] private float jumpForwardSpeed = 2f;    // New tunable forward jump speed
+
         private Rigidbody2D rb;
         private Animator animator;
-        private float jumpForce;
-        private float maxJumpDistance;
         private bool isJumping = false;
         private float jumpStartTime;
-        private Vector2 jumpTarget;
 
         public bool IsJumping => isJumping;
 
-        public void Initialize(Rigidbody2D rigidbody, Animator anim, float force, float maxDist)
+        /// <summary>
+        /// Initialize the jump controller with movement parameters.
+        /// </summary>
+        public void Initialize(
+            Rigidbody2D rigidbody,
+            Animator anim,
+            float force,
+            float maxDist,
+            float forwardSpeed       // New parameter
+        )
         {
             rb = rigidbody;
             animator = anim;
             jumpForce = force;
             maxJumpDistance = maxDist;
+            jumpForwardSpeed = forwardSpeed;
         }
 
+        /// <summary>
+        /// Determines if the enemy can clear the obstacle height.
+        /// </summary>
         public bool CanJumpOver(bool isFacingRight)
-{
-    // Get the obstacle detection component
-    ObstacleDetection detector = GetComponent<ObstacleDetection>();
-    if (detector == null) return false;
-    
-    // Get the height of the obstacle
-    float obstacleHeight = detector.GetObstacleHeight(isFacingRight);
-    Debug.Log($"Obstacle height: {obstacleHeight}");
-    
-    // Calculate maximum jump height using physics formula: h = v²/(2*g)
-    float gravity = Mathf.Abs(Physics2D.gravity.y);
-    float maxHeight = (jumpForce * jumpForce) / (2 * gravity * rb.gravityScale);
-    
-    // Add a small buffer for safety (80% of theoretical max height)
-    maxHeight *= 0.8f;
-    
-    Debug.Log($"Max jump height: {maxHeight}, Required height: {obstacleHeight}");
-    
-    // Return true if we can jump over the obstacle
-    bool canJump = maxHeight >= obstacleHeight && obstacleHeight > 0;
-    Debug.Log($"Can jump over obstacle: {canJump}");
-    
-    return canJump;
-}
+        {
+            ObstacleDetection detector = GetComponent<ObstacleDetection>();
+            if (detector == null)
+                return false;
 
+            float obstacleHeight = detector.GetObstacleHeight(isFacingRight);
+            float gravity = Mathf.Abs(Physics2D.gravity.y);
+            float maxHeight = (jumpForce * jumpForce) / (2 * gravity * rb.gravityScale);
+            maxHeight *= 0.8f;  // Safety buffer
+
+            return obstacleHeight > 0 && maxHeight >= obstacleHeight;
+        }
+
+        /// <summary>
+        /// Determines if the enemy can jump across an edge gap.
+        /// </summary>
         public bool CanJumpAcross(bool isFacingRight)
         {
-            // Reference to the ObstacleDetection component
             ObstacleDetection detector = GetComponent<ObstacleDetection>();
-            if (detector == null) return false;
-
-            // Get the distance to the edge
-            float edgeDistance = detector.GetEdgeDistance(isFacingRight);
-            
-            // If no edge is detected or it's too far, we can't jump
-            if (edgeDistance <= 0 || edgeDistance > maxJumpDistance)
-            {
+            if (detector == null)
                 return false;
-            }
-            
-            return true;
+
+            float edgeDistance = detector.GetEdgeDistance(isFacingRight);
+            return edgeDistance > 0 && edgeDistance <= maxJumpDistance;
         }
 
+        /// <summary>
+        /// Execute the jump: applies both vertical and forward velocity.
+        /// </summary>
         public void ExecuteJump()
         {
             if (!isJumping)
             {
-                // Start the jump
-                rb.linearVelocity = new Vector2(rb.linearVelocity.x, jumpForce);
+                bool facingRight = transform.localScale.x > 0;
+                float hDir = facingRight ? 1f : -1f;
+
+                // Launch with tunable forward and upward components
+                rb.linearVelocity = new Vector2(hDir * jumpForwardSpeed, jumpForce);
                 isJumping = true;
                 jumpStartTime = Time.time;
-                
+
                 if (animator != null)
-                {
                     animator.SetTrigger("jump");
-                }
             }
             else
             {
-                // Check if we've reached the apex of the jump and should transition out
+                // Once past apex, allow landing
                 if (rb.linearVelocity.y < 0.1f)
-                {
                     isJumping = false;
-                }
-                
-                // Maintain horizontal movement during jump
-                // This keeps the momentum going in the right direction
             }
         }
 
+        /// <summary>
+        /// (Optional) Calculate a parabolic arc to target position.
+        /// </summary>
         public void CalculateArcToTarget(Vector2 targetPosition)
         {
             Vector2 startPos = rb.position;
             Vector2 displacement = targetPosition - startPos;
-            
-            // Simple parabolic path calculation
-            // For more complex jumps, you could use projectile motion equations
-            
-            jumpTarget = targetPosition;
+            // Future projectile motion calculations could go here
         }
     }
 }
