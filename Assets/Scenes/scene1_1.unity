@@ -2478,7 +2478,7 @@ MonoBehaviour:
   climbSpeed: 3
   jumpForce: 30
   jumpForwardSpeed: 10
-  maxJumpDistance: 7
+  maxJumpDistance: 5
   aggroCooldown: 3
   groundCheckRadius: 0.2
   groundLayer:
@@ -7660,8 +7660,8 @@ CapsuleCollider2D:
   m_UsedByEffector: 0
   m_CompositeOperation: 0
   m_CompositeOrder: 0
-  m_Offset: {x: -0.015151978, y: -3.531456}
-  m_Size: {x: 0.28781128, y: 2.1822052}
+  m_Offset: {x: -0.015151978, y: -2.5335884}
+  m_Size: {x: 0.28781128, y: 4.1779404}
   m_Direction: 0
 --- !u!1001 &1511442196
 PrefabInstance:
