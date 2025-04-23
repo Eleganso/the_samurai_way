@@ -307,6 +307,39 @@ namespace Enemies.Navigation
             }
         }
 
+        public void ForceStateChange(NavigationState newState)
+{
+    // Only change state if it's different
+    if (currentState != newState)
+    {
+        NavigationState oldState = currentState;
+        currentState = newState;
+        Debug.Log($"Navigation state FORCED from {oldState} to {newState}");
+        
+        // Notify listeners about the state change
+        NotifyStateChange(newState);
+    }
+}
+
+        
+public void ForceClimbingState()
+{
+    if (currentState != NavigationState.Climbing)
+    {
+        currentState = NavigationState.Climbing;
+        Debug.Log("Navigation state forced to Climbing");
+    }
+}
+public void LadderClimbCompleted()
+{
+    // Force state to walking if we were climbing
+    if (currentState == NavigationState.Climbing)
+    {
+        currentState = NavigationState.Walking;
+        Debug.Log("Ladder climb completed, transitioning to Walking state");
+    }
+}
+
         private void UpdateNavigationState()
 {
     // Store the previous state to detect transitions
@@ -330,30 +363,52 @@ namespace Enemies.Navigation
         return;
     }
 
-    // Determine if we're at the top of ladder (to handle edge case)
-    bool preventLadderTransition = false;
-    if (currentState == NavigationState.Climbing)
+    // Get current ladder position from climb controller
+    float ladderTopY = 0;
+    bool isAtLadderTop = false;
+    
+    if (climbController != null && currentState == NavigationState.Climbing)
     {
-        bool nearTopOfLadder = climbController != null && 
-                               !climbController.IsLadderDetected() && 
-                               target.position.y > transform.position.y;
+        // Use reflection to get private fields from climbController
+        var topField = climbController.GetType().GetField("isAtTopOfLadder", 
+                                             System.Reflection.BindingFlags.NonPublic | 
+                                             System.Reflection.BindingFlags.Instance);
+        var yField = climbController.GetType().GetField("lastLadderY", 
+                                             System.Reflection.BindingFlags.NonPublic | 
+                                             System.Reflection.BindingFlags.Instance);
         
-        if (nearTopOfLadder)
+        if (topField != null)
+            isAtLadderTop = (bool)topField.GetValue(climbController);
+            
+        if (yField != null)
+            ladderTopY = (float)yField.GetValue(climbController);
+    }
+
+    // Special handling for ladder top transitions
+    bool preventStateChange = false;
+    
+    if (currentState == NavigationState.Climbing && isAtLadderTop)
+    {
+        // Check if target is above or to the sides
+        bool targetIsAbove = target.position.y > transform.position.y + 0.5f;
+        bool targetIsNearHorizontally = Mathf.Abs(target.position.x - transform.position.x) < 2f;
+        
+        if (targetIsAbove || !targetIsNearHorizontally)
         {
-            // If we're near top of ladder and the target is above us, 
-            // don't transition away from climbing yet
-            preventLadderTransition = true;
-            Debug.Log("Preventing transition from ladder - near top and target is above");
+            // Keep climbing if target is above or not directly to the sides
+            preventStateChange = true;
+            Debug.Log("Preventing state change at ladder top - target position requires staying on ladder");
         }
     }
 
-    if (!preventLadderTransition)
+    if (!preventStateChange)
     {
         switch (currentState)
         {
             case NavigationState.Idle:
                 if (aggro) currentState = NavigationState.Walking;
                 break;
+                
             case NavigationState.Walking:
                 if (shouldJump)
                 {
@@ -370,23 +425,38 @@ namespace Enemies.Navigation
                     StartCoroutine(ReconsiderPath());
                 }
                 break;
+                
             case NavigationState.Jumping:
                 if (isGrounded && !jumpController.IsJumping) currentState = NavigationState.Walking;
                 else if (!isGrounded && !jumpController.IsJumping) currentState = NavigationState.Falling;
                 break;
+                
             case NavigationState.Climbing:
-                // IMPORTANT CHANGE: Only transition away from climbing if NOT on a ladder
-                // And check explicitly with the climb controller to ensure we're not on a ladder
-                if (!isLadderDetected && !climbController.IsLadderDetected())
+                // Only leave climbing state if we're not on a ladder AND not at the top
+                if (!isLadderDetected && !climbController.IsLadderDetected() && !isAtLadderTop)
                 {
-                    if (isGrounded)
-                        currentState = NavigationState.Walking;
+                    // Check if the target is directly above us
+                    bool targetAboveUs = target.position.y > transform.position.y + 1.0f &&
+                                        Mathf.Abs(target.position.x - transform.position.x) < 1.0f;
+                    
+                    // If the target is above us and we're at the top of a ladder,
+                    // don't transition away from climbing
+                    if (targetAboveUs && isAtLadderTop)
+                    {
+                        Debug.Log("Target is above us at ladder top, staying in climbing state");
+                    }
                     else
-                        currentState = NavigationState.Falling;
-                        
-                    Debug.Log("Transitioning away from climbing state - no ladder detected");
+                    {
+                        if (isGrounded)
+                            currentState = NavigationState.Walking;
+                        else
+                            currentState = NavigationState.Falling;
+                            
+                        Debug.Log("Transitioning away from climbing state - no ladder detected");
+                    }
                 }
                 break;
+                
             case NavigationState.Falling:
                 if (isGrounded) 
                     currentState = NavigationState.Walking;
@@ -422,19 +492,26 @@ private void NotifyStateChange(NavigationState newState)
 
         private bool ShouldClimb()
 {
-    // First, check if we're already climbing and still on a ladder
-    if (currentState == NavigationState.Climbing && isLadderDetected)
+    // Special case: if we're already climbing and the ClimbController says we're on a ladder, keep climbing
+    if (currentState == NavigationState.Climbing && climbController != null && climbController.IsLadderDetected())
+    {
         return true;
-        
-    // Otherwise, check the normal conditions
+    }
+    
+    // Standard ladder detection
     if (!isLadderDetected) return false;
+    
+    // Climb if target is above
     if (isTargetAbove) return true;
+    
+    // Climb if we can't jump over an obstacle and target is behind it
     if (isObstacleAhead && !jumpController.CanJumpOver(isFacingRight))
     {
         float obstDir = isFacingRight ? 1 : -1;
         float targDir = target.position.x - transform.position.x;
         if (Mathf.Sign(targDir) == obstDir) return true;
     }
+    
     return false;
 }
 
