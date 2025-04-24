@@ -259,6 +259,8 @@ namespace Enemies.Navigation
 
             // Environment checks
             isGrounded = obstacleDetector.IsGrounded();
+            // Update isFacingRight based on current scale for obstacle detection
+            isFacingRight = transform.localScale.x > 0;
             isObstacleAhead = obstacleDetector.IsObstacleAhead(isFacingRight);
             isEdgeAhead = obstacleDetector.IsEdgeAhead(isFacingRight);
             isLadderDetected = climbController.IsLadderDetected();
@@ -274,26 +276,10 @@ namespace Enemies.Navigation
             shouldClimb = ShouldClimb();
 
             UpdateNavigationState();
-
-            // Check if enemy is aggro'd - IMPORTANT: Same logic as in UpdateNavigationState
-            bool aggro = false;
-            if (enemyAggro != null) aggro = enemyAggro.IsAggroed;
-            else if (Vector2.Distance(transform.position, target.position) <= maxTargetDistance && isTargetReachable) 
-                aggro = true;
-            else if (Time.time - lastAggroTime < aggroCooldown) 
-                aggro = true;
-
-            // Only update facing direction if aggro'd and in appropriate states
-            if (aggro && currentState != NavigationState.Climbing && currentState != NavigationState.Jumping)
-            {
-                // Only flip if the enemy needs to move (not just standing near the player)
-                if (Mathf.Abs(target.position.x - transform.position.x) > minTargetDistance)
-                {
-                    if (dirVec.x > 0.1f && !isFacingRight) Flip();
-                    else if (dirVec.x < -0.1f && isFacingRight) Flip();
-                }
-            }
-
+            
+            // REMOVED ALL AUTOMATIC FACING LOGIC
+            // The ElfSwordsman class will handle all facing direction changes
+            
             UpdateAnimations();
             CheckIfStuck();
         }
@@ -635,7 +621,8 @@ namespace Enemies.Navigation
         private IEnumerator ReconsiderPath()
         {
             yield return new WaitForSeconds(0.5f);
-            Flip();
+            // Let the ElfSwordsman handle flipping, don't flip here
+            // Flip();
             currentState = NavigationState.Walking;
             NotifyStateChange(NavigationState.Walking);
         }
@@ -643,7 +630,7 @@ namespace Enemies.Navigation
         /// <summary>
         /// Flip the enemy's facing direction
         /// </summary>
-        private void Flip()
+        public void Flip()
         {
             isFacingRight = !isFacingRight;
             var scale = transform.localScale;
