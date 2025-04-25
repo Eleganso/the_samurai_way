@@ -10,9 +10,14 @@ namespace Enemies.Navigation
         [SerializeField] private int maxPredictionSteps = 20;
         [SerializeField] private float stepDistance = 1f;
         [SerializeField] private float directPathCostWeight = 1f;
-        [SerializeField] private float heightDifferenceWeight = 2f;
+        [SerializeField] private float heightDifferenceWeight = 10f;
         [SerializeField] private float obstacleCountWeight = 3f;
         [SerializeField] private float maxPathfindingDistance = 15f;
+        
+        [Header("Path Switching")]
+        [SerializeField] private float pathSwitchCooldown = 1.5f; // How long before switching paths
+        [SerializeField] private bool targetTrackingPriority = true; // Makes direct tracking a priority
+        [SerializeField] private float minDirectDistanceThreshold = 5f; // If player is closer than this, use direct path
         
         [Header("Debug Visualization")]
         [SerializeField] private bool visualizePaths = true;
@@ -37,7 +42,15 @@ namespace Enemies.Navigation
         
         // References to target and waypoint system
         private Transform target;
+        private Transform currentTarget; // Current actual navigation target
         private WaypointSystem waypointSystem;
+        
+        // Path switching state
+        private bool isUsingAlternatePath = false;
+        private float lastPathSwitchTime = 0f;
+        private GameObject tempTarget = null;
+        private Vector2 lastTargetPosition;
+        private bool targetJustSwitchedSides = false;
         
         private void Awake()
         {
@@ -80,6 +93,7 @@ namespace Enemies.Navigation
             if (navTarget != null)
             {
                 target = (Transform)navTarget.GetValue(navigationController);
+                currentTarget = target;
             }
             
             if (target == null)
@@ -88,6 +102,7 @@ namespace Enemies.Navigation
                 if (playerObj != null)
                 {
                     target = playerObj.transform;
+                    currentTarget = target;
                 }
             }
             
@@ -96,6 +111,11 @@ namespace Enemies.Navigation
                 Debug.LogError("No target found for PathPredictor.");
                 enabled = false;
             }
+            
+            if (target != null)
+            {
+                lastTargetPosition = target.position;
+            }
         }
         
         private void Update()
@@ -103,8 +123,31 @@ namespace Enemies.Navigation
             if (target == null || !navigationController.enabled)
                 return;
                 
-            // Check distance to target
+            // Check if the path switch cooldown is active
+            if (Time.time - lastPathSwitchTime < pathSwitchCooldown)
+                return;
+                
+            // Direct distance to target
             float distanceToTarget = Vector2.Distance(transform.position, target.position);
+            
+            // Check if target has switched sides (crossed over the enemy)
+            CheckTargetSideSwitched();
+            
+            // If target just switched sides OR is close, force direct path
+            if (targetJustSwitchedSides || (targetTrackingPriority && distanceToTarget < minDirectDistanceThreshold))
+            {
+                if (isUsingAlternatePath)
+                {
+                    RevertToDirectPath();
+                    isUsingAlternatePath = false;
+                    lastPathSwitchTime = Time.time;
+                    Debug.Log("Switched to direct path due to target switching sides or being close");
+                }
+                targetJustSwitchedSides = false;
+                return;
+            }
+            
+            // Don't recalculate if target is too far
             if (distanceToTarget > maxPathfindingDistance)
                 return;
                 
@@ -112,10 +155,45 @@ namespace Enemies.Navigation
             PredictDirectPath();
             PredictAlternatePath();
             
-            // Compare paths and update navigation if needed
-            if (ShouldUseAlternatePath())
+            // Decide if we should switch paths
+            bool shouldUseAlternatePath = ShouldUseAlternatePath();
+            
+            if (shouldUseAlternatePath != isUsingAlternatePath)
             {
-                ApplyAlternatePathNavigation();
+                // Switch paths
+                if (shouldUseAlternatePath)
+                {
+                    ApplyAlternatePathNavigation();
+                    isUsingAlternatePath = true;
+                }
+                else
+                {
+                    RevertToDirectPath();
+                    isUsingAlternatePath = false;
+                }
+                
+                // Set cooldown
+                lastPathSwitchTime = Time.time;
+            }
+            
+            // Save target position for next frame
+            lastTargetPosition = target.position;
+        }
+        
+        // Check if target crossed over the enemy (switched sides)
+        private void CheckTargetSideSwitched()
+        {
+            if (target == null) return;
+            
+            // Calculate which side of the enemy the target is on
+            bool wasOnRight = lastTargetPosition.x > transform.position.x;
+            bool isOnRight = target.position.x > transform.position.x;
+            
+            // If target switched sides, flag it
+            if (wasOnRight != isOnRight)
+            {
+                targetJustSwitchedSides = true;
+                Debug.Log("Target switched sides!");
             }
         }
         
@@ -132,6 +210,31 @@ namespace Enemies.Navigation
                 
             // Default to direct path
             return false;
+        }
+        
+        // Switch to direct path targeting the player
+        private void RevertToDirectPath()
+        {
+            // Access the target field
+            var navTarget = navigationController.GetType().GetField("target", 
+                                System.Reflection.BindingFlags.NonPublic | 
+                                System.Reflection.BindingFlags.Instance);
+                                
+            if (navTarget != null && target != null)
+            {
+                // Set the original target
+                navTarget.SetValue(navigationController, target);
+                currentTarget = target;
+                
+                Debug.Log("Reverting to direct path to player");
+            }
+            
+            // Clean up temporary target if any
+            if (tempTarget != null)
+            {
+                Destroy(tempTarget);
+                tempTarget = null;
+            }
         }
         
         // Predict the direct path to target
@@ -162,7 +265,11 @@ namespace Enemies.Navigation
             if (hit.collider == null || hit.collider.transform == target)
             {
                 directPath.Add(targetPos);
-                directPathCost = totalDistance;
+                
+                // Still account for height difference
+                totalHeightDifference = Mathf.Abs(targetPos.y - currentPos.y);
+                
+                directPathCost = CalculatePathCost(directPath, obstacleCount, totalHeightDifference);
                 return;
             }
             
@@ -245,12 +352,38 @@ namespace Enemies.Navigation
                     obstacleCount++;
                 }
                 
-                // Add height difference
-                totalHeightDifference += Mathf.Abs(end.y - start.y);
+                // Add height difference with a discount for ladder segments
+                float heightDiff = Mathf.Abs(end.y - start.y);
+                
+                // If this is a ladder segment (mostly vertical), apply discount
+                if (IsLadderSegment(i))
+                {
+                    // Apply 80% discount to ladder height differences
+                    totalHeightDifference += heightDiff * 0.2f;
+                }
+                else
+                {
+                    totalHeightDifference += heightDiff;
+                }
             }
             
-            // Calculate cost
-            alternatePathCost = CalculatePathCost(alternatePath, obstacleCount, totalHeightDifference);
+            // Calculate cost and apply a small discount to waypoint paths
+            alternatePathCost = CalculatePathCost(alternatePath, obstacleCount, totalHeightDifference) * 0.9f;
+        }
+        
+        // Check if a segment is likely a ladder (mostly vertical)
+        private bool IsLadderSegment(int index)
+        {
+            if (alternatePath.Count <= index + 1) return false;
+            
+            Vector2 start = alternatePath[index];
+            Vector2 end = alternatePath[index + 1];
+            
+            float yDiff = Mathf.Abs(end.y - start.y);
+            float xDiff = Mathf.Abs(end.x - start.x);
+            
+            // If vertical component is much larger than horizontal, it's likely a ladder
+            return yDiff > xDiff * 1.5f;
         }
         
         // Apply the alternate path to the navigation controller
@@ -264,10 +397,6 @@ namespace Enemies.Navigation
             {
                 Vector2 nextPoint = alternatePath[1];
                 
-                // Set intermediate target for navigation
-                // This requires adding a SetIntermediateTarget method to EnemyNavigationController
-                // which we'll implement later
-                
                 // For now, directly access the target field if available
                 var navTarget = navigationController.GetType().GetField("target", 
                                     System.Reflection.BindingFlags.NonPublic | 
@@ -275,39 +404,23 @@ namespace Enemies.Navigation
                                     
                 if (navTarget != null)
                 {
-                    // Store original target
-                    Transform originalTarget = target;
+                    // Clean up existing temp target if any
+                    if (tempTarget != null)
+                    {
+                        Destroy(tempTarget);
+                    }
                     
                     // Create temporary object at waypoint position
-                    GameObject tempTarget = new GameObject("TempNavigationTarget");
+                    tempTarget = new GameObject("TempNavigationTarget");
                     tempTarget.transform.position = nextPoint;
                     
                     // Set as target
                     navTarget.SetValue(navigationController, tempTarget.transform);
+                    currentTarget = tempTarget.transform;
                     
-                    // Schedule destruction and target reset
-                    StartCoroutine(ResetTarget(tempTarget, originalTarget, 1.5f));
+                    Debug.Log($"Set intermediate target at {nextPoint}");
                 }
             }
-        }
-        
-        // Reset the target after using a temporary waypoint
-        private System.Collections.IEnumerator ResetTarget(GameObject tempTarget, Transform originalTarget, float delay)
-        {
-            yield return new WaitForSeconds(delay);
-            
-            // Reset original target
-            var navTarget = navigationController.GetType().GetField("target", 
-                                System.Reflection.BindingFlags.NonPublic | 
-                                System.Reflection.BindingFlags.Instance);
-                                
-            if (navTarget != null)
-            {
-                navTarget.SetValue(navigationController, originalTarget);
-            }
-            
-            // Destroy temp object
-            Destroy(tempTarget);
         }
         
         // Calculate the cost of a path based on length, obstacles, and height changes
@@ -375,7 +488,17 @@ namespace Enemies.Navigation
                 Gizmos.color = alternatePathColor;
                 for (int i = 0; i < alternatePath.Count - 1; i++)
                 {
-                    Gizmos.DrawLine(alternatePath[i], alternatePath[i + 1]);
+                    // Highlight ladder segments
+                    if (IsLadderSegment(i))
+                    {
+                        Gizmos.color = Color.magenta;
+                        Gizmos.DrawLine(alternatePath[i], alternatePath[i + 1]);
+                        Gizmos.color = alternatePathColor;
+                    }
+                    else
+                    {
+                        Gizmos.DrawLine(alternatePath[i], alternatePath[i + 1]);
+                    }
                 }
                 
                 // Draw cost
@@ -385,6 +508,23 @@ namespace Enemies.Navigation
                     DrawLabel(midPoint, $"Cost: {alternatePathCost:F1}");
                 }
             }
+            
+            // Show current target info
+            if (isUsingAlternatePath)
+            {
+                DrawLabel(transform.position + Vector3.up * 0.5f, "Using Alternate Path");
+                
+                // Highlight current waypoint
+                if (tempTarget != null)
+                {
+                    Gizmos.color = Color.cyan;
+                    Gizmos.DrawWireSphere(tempTarget.transform.position, 0.3f);
+                }
+            }
+            else
+            {
+                DrawLabel(transform.position + Vector3.up * 0.5f, "Using Direct Path");
+            }
         }
         
         private void DrawLabel(Vector2 position, string text)
@@ -392,6 +532,16 @@ namespace Enemies.Navigation
             #if UNITY_EDITOR
             UnityEditor.Handles.Label(position, text);
             #endif
+        }
+        
+        // Clean up on destroy
+        private void OnDestroy()
+        {
+            if (tempTarget != null)
+            {
+                Destroy(tempTarget);
+                tempTarget = null;
+            }
         }
     }
 }
