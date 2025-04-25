@@ -35,6 +35,9 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
     [SerializeField] private float climbSpeed = 2f;
     [SerializeField] private float maxJumpDistance = 3f;
     [SerializeField] private bool useNavigationSystem = true;
+    [SerializeField] private bool useEnhancedNavigation = true;
+    [SerializeField] private float waypointDetectionRadius = 10f;
+    [SerializeField] private bool visualizeNavigationPaths = true;
 
     private int patrolDestination = 0;
     private bool isChasing = false;
@@ -67,6 +70,7 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
     private bool isPlayerInChaseZone = false;
 
     private bool previousAggroState = false;
+    private bool isUsingAlternatePath = false;
 
     private void Awake()
     {
@@ -150,6 +154,43 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
             {
                 navigationController.SetTarget(playerTransform);
             }
+            
+            // Configure enhanced navigation if enabled
+            if (useEnhancedNavigation)
+            {
+                // Set useEnhancedNavigation field via reflection
+                var enhancedNavField = navigationController.GetType().GetField("useEnhancedNavigation", 
+                                          System.Reflection.BindingFlags.Public | 
+                                          System.Reflection.BindingFlags.NonPublic | 
+                                          System.Reflection.BindingFlags.Instance);
+                                          
+                if (enhancedNavField != null)
+                {
+                    enhancedNavField.SetValue(navigationController, true);
+                }
+                
+                // Set waypointDetectionRadius field via reflection
+                var radiusField = navigationController.GetType().GetField("waypointDetectionRadius", 
+                                     System.Reflection.BindingFlags.Public | 
+                                     System.Reflection.BindingFlags.NonPublic | 
+                                     System.Reflection.BindingFlags.Instance);
+                                     
+                if (radiusField != null)
+                {
+                    radiusField.SetValue(navigationController, waypointDetectionRadius);
+                }
+                
+                // Set visualizeEnhancedPaths field via reflection
+                var visualizeField = navigationController.GetType().GetField("visualizeEnhancedPaths", 
+                                       System.Reflection.BindingFlags.Public | 
+                                       System.Reflection.BindingFlags.NonPublic | 
+                                       System.Reflection.BindingFlags.Instance);
+                                       
+                if (visualizeField != null)
+                {
+                    visualizeField.SetValue(navigationController, visualizeNavigationPaths);
+                }
+            }
         }
 
         aggro = false;
@@ -158,96 +199,132 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
     }
     
     void Update()
-{
-    if (isBehaviorDisabled || !canMove || isStaggering || isPerformingHalfHealthAction || isPerformingSomeAction || isCharging)
     {
-        if (navigationController != null && useNavigationSystem)
+        if (isBehaviorDisabled || !canMove || isStaggering || isPerformingHalfHealthAction || isPerformingSomeAction || isCharging)
         {
-            navigationController.EnableNavigation(false);
-        }
-        return;
-    }
-
-    HasTarget = detectionZone.detectedColliders.Count > 0;
-
-    // Calculate the center of the proximity detection with offsets
-    Vector2 proximityCenter = new Vector2(transform.position.x + proximityDetectionOffsetX, transform.position.y + proximityDetectionOffsetY);
-
-    isPlayerInProximity = Vector2.Distance(proximityCenter, playerTransform.position) <= proximityDetectionRadius;
-
-    bool isPlayerDetectable = true;
-    if (player != null)
-    {
-        if (player.isCrouchingInBushes && !isPlayerInProximity)
-        {
-            isPlayerDetectable = false;
-        }
-    }
-
-    if (!aggro)
-    {
-        if (isPlayerInProximity)
-        {
-            SetAggro(true);
-        }
-        else if (isPlayerDetectable && isPlayerInChaseZone)
-        {
-            SetAggro(true);
-        }
-        else
-        {
-            SetAggro(false);
-        }
-    }
-
-    if (aggro)
-    {
-        // Always face the player when aggro'd
-        FacePlayer();
-        
-        float distanceToPlayer = Vector2.Distance(transform.position, playerTransform.position);
-        if (distanceToPlayer <= chaseDistanceAggro)
-        {
-            isChasing = true;
-            
-            // Enable navigation system when chasing and aggro'd
             if (navigationController != null && useNavigationSystem)
             {
-                navigationController.EnableNavigation(true);
+                navigationController.EnableNavigation(false);
+            }
+            return;
+        }
+
+        HasTarget = detectionZone.detectedColliders.Count > 0;
+
+        // Calculate the center of the proximity detection with offsets
+        Vector2 proximityCenter = new Vector2(transform.position.x + proximityDetectionOffsetX, transform.position.y + proximityDetectionOffsetY);
+
+        isPlayerInProximity = Vector2.Distance(proximityCenter, playerTransform.position) <= proximityDetectionRadius;
+
+        bool isPlayerDetectable = true;
+        if (player != null)
+        {
+            if (player.isCrouchingInBushes && !isPlayerInProximity)
+            {
+                isPlayerDetectable = false;
+            }
+        }
+
+        if (!aggro)
+        {
+            if (isPlayerInProximity)
+            {
+                SetAggro(true);
+            }
+            else if (isPlayerDetectable && isPlayerInChaseZone)
+            {
+                SetAggro(true);
+            }
+            else
+            {
+                SetAggro(false);
+            }
+        }
+
+        if (aggro)
+        {
+            // Always face the player when aggro'd
+            FacePlayer();
+            
+            float distanceToPlayer = Vector2.Distance(transform.position, playerTransform.position);
+            if (distanceToPlayer <= chaseDistanceAggro)
+            {
+                isChasing = true;
+                
+                // Enable navigation system when chasing and aggro'd
+                if (navigationController != null && useNavigationSystem)
+                {
+                    navigationController.EnableNavigation(true);
+                    
+                    // Check if using an alternate path
+                    if (useEnhancedNavigation)
+                    {
+                        CheckAlternatePathStatus();
+                    }
+                }
+            }
+            else
+            {
+                SetAggro(false);
+                isChasing = false;
+                
+                // Disable navigation when not chasing
+                if (navigationController != null && useNavigationSystem)
+                {
+                    navigationController.EnableNavigation(false);
+                }
             }
         }
         else
         {
-            SetAggro(false);
             isChasing = false;
             
-            // Disable navigation when not chasing
+            // Disable navigation when not aggro'd
             if (navigationController != null && useNavigationSystem)
             {
                 navigationController.EnableNavigation(false);
             }
         }
-    }
-    else
-    {
-        isChasing = false;
-        
-        // Disable navigation when not aggro'd
-        if (navigationController != null && useNavigationSystem)
+
+        UpdateLayerBasedOnAggro();
+
+        HandleHalfHealthAction();
+
+        if (HasTarget && canMove && !isCharging)
         {
-            navigationController.EnableNavigation(false);
+            animator.SetTrigger("attack");
         }
     }
 
-    UpdateLayerBasedOnAggro();
-
-    HandleHalfHealthAction();
-
-    if (HasTarget && canMove && !isCharging)
+    // Check if we're using an alternate path via the navigation controller
+    private void CheckAlternatePathStatus()
     {
-        animator.SetTrigger("attack");
+        // Get isUsingAlternatePath field via reflection
+        var isUsingField = navigationController.GetType().GetField("isUsingAlternatePath", 
+                              System.Reflection.BindingFlags.NonPublic | 
+                              System.Reflection.BindingFlags.Instance);
+                              
+        if (isUsingField != null)
+        {
+            bool currentlyUsingAlternatePath = (bool)isUsingField.GetValue(navigationController);
+            
+            // Only log a change in path usage
+            if (currentlyUsingAlternatePath != isUsingAlternatePath)
+            {
+                isUsingAlternatePath = currentlyUsingAlternatePath;
+                
+                if (isUsingAlternatePath)
+                {
+                    Debug.Log($"{gameObject.name} is now using an alternate path to reach the player");
+                }
+                else
+                {
+                    Debug.Log($"{gameObject.name} is now using a direct path to reach the player");
+                }
+            }
+        }
     }
-}
+    
     private void FixedUpdate()
     {
         // Skip FixedUpdate movement logic if navigation system is handling it
@@ -494,6 +571,17 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
 
         Gizmos.color = Color.red;
         Gizmos.DrawWireSphere(transform.position, chaseDistanceAggro);
+        
+        // Show if using alternate path
+        if (Application.isPlaying && isUsingAlternatePath)
+        {
+            Gizmos.color = Color.magenta;
+            Gizmos.DrawWireSphere(transform.position + Vector3.up * 1.5f, 0.3f);
+            
+            #if UNITY_EDITOR
+            UnityEditor.Handles.Label(transform.position + Vector3.up * 2f, "Using Alternate Path");
+            #endif
+        }
     }
 
     private void HandleHalfHealthAction()
@@ -568,57 +656,58 @@ public class ElfSwordsman : MonoBehaviour, IEnemyActions, IChaseZoneUser, IEnemy
     }
 
     private void FacePlayer()
-{
-    if (playerTransform == null) return;
-    
-    float direction = transform.position.x > playerTransform.position.x ? -1 : 1;
-    transform.localScale = new Vector3(direction * Mathf.Abs(transform.localScale.x), transform.localScale.y, transform.localScale.z);
-    
-    // If using navigation system, update its facing direction as well
-    if (navigationController != null && useNavigationSystem)
     {
-        // Update the isFacingRight value in the navigation controller
-        bool isFacingRight = transform.localScale.x > 0;
-        // We don't need to call Flip() since we already set the scale directly
+        if (playerTransform == null) return;
+        
+        float direction = transform.position.x > playerTransform.position.x ? -1 : 1;
+        transform.localScale = new Vector3(direction * Mathf.Abs(transform.localScale.x), transform.localScale.y, transform.localScale.z);
+        
+        // If using navigation system, update its facing direction as well
+        if (navigationController != null && useNavigationSystem)
+        {
+            // Update the isFacingRight value in the navigation controller
+            bool isFacingRight = transform.localScale.x > 0;
+            // We don't need to call Flip() since we already set the scale directly
+        }
     }
-}
 
     // Implementation of IEnemyAggro
     public void SetAggro(bool isAggro)
-{
-    // If transitioning from non-aggro to aggro, face the player
-    if (!aggro && isAggro)
     {
-        FacePlayer();
-    }
-    
-    aggro = isAggro;
-    UpdateLayerBasedOnAggro(); // Ensure layer is updated immediately
-    
-    // Update navigation system based on aggro state
-    if (navigationController != null && useNavigationSystem)
-    {
-        navigationController.EnableNavigation(isAggro);
+        // If transitioning from non-aggro to aggro, face the player
+        if (!aggro && isAggro)
+        {
+            FacePlayer();
+        }
+        
+        aggro = isAggro;
+        UpdateLayerBasedOnAggro(); // Ensure layer is updated immediately
+        
+        // Update navigation system based on aggro state
+        if (navigationController != null && useNavigationSystem)
+        {
+            navigationController.EnableNavigation(isAggro);
+        }
+
+        // Change the ChaseZone's layer based on the aggro state
+        if (chaseZone != null)
+        {
+            chaseZone.gameObject.layer = aggro ? LayerMask.NameToLayer("EnemyHitboxAggro") : LayerMask.NameToLayer("EnemyHitbox");
+        }
+
+        // Change the DetectionZone's layer based on the aggro state
+        if (detectionZone != null)
+        {
+            detectionZone.gameObject.layer = aggro ? LayerMask.NameToLayer("EnemyHitboxAggro") : LayerMask.NameToLayer("EnemyHitbox");
+        }
+
+        // Change the SwordAttack's layer based on the aggro state
+        if (swordAttackZone != null)
+        {
+            swordAttackZone.gameObject.layer = aggro ? LayerMask.NameToLayer("EnemyHitboxAggro") : LayerMask.NameToLayer("EnemyHitbox");
+        }
     }
 
-    // Change the ChaseZone's layer based on the aggro state
-    if (chaseZone != null)
-    {
-        chaseZone.gameObject.layer = aggro ? LayerMask.NameToLayer("EnemyHitboxAggro") : LayerMask.NameToLayer("EnemyHitbox");
-    }
-
-    // Change the DetectionZone's layer based on the aggro state
-    if (detectionZone != null)
-    {
-        detectionZone.gameObject.layer = aggro ? LayerMask.NameToLayer("EnemyHitboxAggro") : LayerMask.NameToLayer("EnemyHitbox");
-    }
-
-    // Change the SwordAttack's layer based on the aggro state
-    if (swordAttackZone != null)
-    {
-        swordAttackZone.gameObject.layer = aggro ? LayerMask.NameToLayer("EnemyHitboxAggro") : LayerMask.NameToLayer("EnemyHitbox");
-    }
-}
     public bool IsAggroed
     {
         get { return aggro; }

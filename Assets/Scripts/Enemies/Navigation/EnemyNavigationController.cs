@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Enemies.Navigation
@@ -22,7 +23,7 @@ namespace Enemies.Navigation
         [SerializeField] private float moveSpeed = 3f;
         [SerializeField] private float climbSpeed = 2f;
         [SerializeField] private float jumpForce = 8f;
-        [SerializeField] private float jumpForwardSpeed = 2f;      // New tunable forward jump speed
+        [SerializeField] private float jumpForwardSpeed = 2f;      // Forward jump speed
         [SerializeField] private float maxJumpDistance = 3f;
         [SerializeField] private float aggroCooldown = 3f; // How long to chase after losing sight
 
@@ -38,6 +39,14 @@ namespace Enemies.Navigation
         [Header("Ladder Detection")]
         [SerializeField] private float ladderCheckRadius = 0.5f;
         [SerializeField] private LayerMask ladderLayer;
+
+        [Header("Enhanced Navigation")]
+        [SerializeField] private bool useEnhancedNavigation = true;
+        [SerializeField] private float waypointDetectionRadius = 10f;
+        [SerializeField] private float alternateRoutePreference = 0.8f; // Lower values prefer alternate routes more
+        [SerializeField] private float intermediateTargetReachedDistance = 1f;
+        [SerializeField] private float pathRecalculationInterval = 1.5f;
+        [SerializeField] private bool visualizeEnhancedPaths = true;
 
         // State management
         private NavigationState currentState = NavigationState.Idle;
@@ -62,6 +71,14 @@ namespace Enemies.Navigation
         private bool shouldClimb;
         private float lastAggroTime;
         private bool isNavigationPaused = false;
+
+        // Advanced navigation
+        private WaypointSystem waypointSystem;
+        private bool isUsingAlternatePath = false;
+        private List<Vector2> alternatePath = new List<Vector2>();
+        private int currentPathIndex = 0;
+        private Transform intermediateTarget = null;
+        private float lastPathCalculationTime = 0f;
 
         // Stuck detection
         private float stuckTimer = 0f;
@@ -141,6 +158,16 @@ namespace Enemies.Navigation
             {
                 var player = GameObject.FindGameObjectWithTag("Player");
                 if (player != null) target = player.transform;
+            }
+            
+            // Get waypoint system if enhanced navigation is enabled
+            if (useEnhancedNavigation)
+            {
+                waypointSystem = FindObjectOfType<WaypointSystem>();
+                if (waypointSystem == null)
+                {
+                    Debug.LogWarning("WaypointSystem not found. Enhanced navigation will be limited.");
+                }
             }
             
             Debug.Log($"Initial facing direction: {(isFacingRight ? "right" : "left")}");
@@ -271,13 +298,43 @@ namespace Enemies.Navigation
             var hit = Physics2D.Linecast(transform.position, target.position, obstacleLayer);
             isTargetReachable = hit.collider == null || hit.collider.transform == target;
 
-            // Decisions
+            // Enhanced navigation - handle intermediate targets
+            if (useEnhancedNavigation && intermediateTarget != null)
+            {
+                // Check if we've reached the intermediate target
+                float distToIntermediate = Vector2.Distance(transform.position, intermediateTarget.position);
+                if (distToIntermediate <= intermediateTargetReachedDistance)
+                {
+                    ClearIntermediateTarget();
+                }
+            }
+
+            // Enhanced navigation - recalculate path periodically
+            if (useEnhancedNavigation && waypointSystem != null)
+            {
+                if (Time.time - lastPathCalculationTime >= pathRecalculationInterval)
+                {
+                    lastPathCalculationTime = Time.time;
+                    
+                    // Only recalculate when aggroed and target is unreachable or at different height
+                    bool aggro = enemyAggro != null ? enemyAggro.IsAggroed : false;
+                    if (aggro && (!isTargetReachable || isTargetAbove))
+                    {
+                        EvaluateAndSetAlternatePath();
+                    }
+                    else
+                    {
+                        ClearAlternatePath();
+                    }
+                }
+            }
+
+            // Decisions for standard navigation
             shouldJump = ShouldJump();
             shouldClimb = ShouldClimb();
 
             UpdateNavigationState();
             
-            // REMOVED ALL AUTOMATIC FACING LOGIC
             // The ElfSwordsman class will handle all facing direction changes
             
             UpdateAnimations();
@@ -288,13 +345,16 @@ namespace Enemies.Navigation
         {
             if (target == null || isNavigationPaused) return;
 
+            // When using an intermediate target, adjust the target reference for movement
+            Transform effectiveTarget = (intermediateTarget != null) ? intermediateTarget : target;
+
             switch (currentState)
             {
                 case NavigationState.Idle:
                     rb.linearVelocity = new Vector2(0, rb.linearVelocity.y);
                     break;
                 case NavigationState.Walking:
-                    float dx = target.position.x - transform.position.x;
+                    float dx = effectiveTarget.position.x - transform.position.x;
                     float mDir = Mathf.Sign(dx);
                     if (Mathf.Abs(dx) > minTargetDistance)
                         rb.linearVelocity = new Vector2(mDir * moveSpeed, rb.linearVelocity.y);
@@ -305,10 +365,10 @@ namespace Enemies.Navigation
                     jumpController.ExecuteJump();
                     break;
                 case NavigationState.Climbing:
-                    climbController.ExecuteClimb(target.position.y);
+                    climbController.ExecuteClimb(effectiveTarget.position.y);
                     break;
                 case NavigationState.Falling:
-                    float airDir = Mathf.Sign(target.position.x - transform.position.x);
+                    float airDir = Mathf.Sign(effectiveTarget.position.x - transform.position.x);
                     rb.linearVelocity = new Vector2(airDir * moveSpeed * 0.8f, rb.linearVelocity.y);
                     break;
                 case NavigationState.PathPlanning:
@@ -601,14 +661,17 @@ namespace Enemies.Navigation
             // Standard ladder detection
             if (!isLadderDetected) return false;
             
+            // When using an intermediate target, adjust the target reference for decisions
+            Transform effectiveTarget = (intermediateTarget != null) ? intermediateTarget : target;
+            
             // Climb if target is above
-            if (isTargetAbove) return true;
+            if (effectiveTarget.position.y > transform.position.y + 0.5f) return true;
             
             // Climb if we can't jump over an obstacle and target is behind it
             if (isObstacleAhead && !jumpController.CanJumpOver(isFacingRight))
             {
                 float obstDir = isFacingRight ? 1 : -1;
-                float targDir = target.position.x - transform.position.x;
+                float targDir = effectiveTarget.position.x - transform.position.x;
                 if (Mathf.Sign(targDir) == obstDir) return true;
             }
             
@@ -621,6 +684,13 @@ namespace Enemies.Navigation
         private IEnumerator ReconsiderPath()
         {
             yield return new WaitForSeconds(0.5f);
+            
+            // Enhanced navigation - try to find an alternate path
+            if (useEnhancedNavigation && waypointSystem != null)
+            {
+                EvaluateAndSetAlternatePath();
+            }
+            
             // Let the ElfSwordsman handle flipping, don't flip here
             // Flip();
             currentState = NavigationState.Walking;
@@ -692,19 +762,152 @@ namespace Enemies.Navigation
         }
 
         /// <summary>
+        /// Evaluate and set an alternate path to the target using waypoints
+        /// </summary>
+        private void EvaluateAndSetAlternatePath()
+        {
+            if (waypointSystem == null || target == null)
+                return;
+
+            // Check if direct path is blocked or vertical difference is significant
+            bool isPathDifficult = !isTargetReachable || Mathf.Abs(target.position.y - transform.position.y) > 1.5f;
+            
+            if (isPathDifficult)
+            {
+                // Find a path using waypoints
+                List<Vector2> path = waypointSystem.FindPathFromPositions(
+                    transform.position, 
+                    target.position, 
+                    waypointDetectionRadius
+                );
+                
+                // If we found a valid path with at least one waypoint
+                if (path.Count > 2) // Start, at least one waypoint, and end
+                {
+                    alternatePath = path;
+                    currentPathIndex = 1; // Index 0 is our starting position
+                    isUsingAlternatePath = true;
+                    
+                    // Set the first waypoint as an intermediate target
+                    SetIntermediateTarget(alternatePath[currentPathIndex]);
+                    
+                    Debug.Log($"Set alternate path with {alternatePath.Count - 2} waypoints");
+                    return;
+                }
+            }
+            
+            // If no alternate path was found or needed, clear any existing one
+            ClearAlternatePath();
+        }
+        
+        /// <summary>
+        /// Clear the alternate path and reset to direct targeting
+        /// </summary>
+        private void ClearAlternatePath()
+        {
+            isUsingAlternatePath = false;
+            alternatePath.Clear();
+            currentPathIndex = 0;
+            ClearIntermediateTarget();
+        }
+        
+        /// <summary>
+        /// Set an intermediate target at the specified position
+        /// </summary>
+        private void SetIntermediateTarget(Vector2 position)
+        {
+            // Clean up any existing intermediate target
+            ClearIntermediateTarget();
+            
+            // Create a new GameObject for the intermediate target
+            GameObject targetObj = new GameObject("IntermediateTarget");
+            targetObj.transform.position = position;
+            intermediateTarget = targetObj.transform;
+            
+            Debug.Log($"Set intermediate target at {position}");
+        }
+        
+        /// <summary>
+        /// Clear the current intermediate target
+        /// </summary>
+        private void ClearIntermediateTarget()
+        {
+            if (intermediateTarget != null)
+            {
+                Destroy(intermediateTarget.gameObject);
+                intermediateTarget = null;
+            }
+        }
+        
+        /// <summary>
+        /// Advance to the next waypoint in the path
+        /// </summary>
+        private void AdvanceToNextWaypoint()
+        {
+            if (!isUsingAlternatePath || alternatePath.Count <= 2 || currentPathIndex >= alternatePath.Count - 1)
+            {
+                ClearAlternatePath();
+                return;
+            }
+            
+            currentPathIndex++;
+            SetIntermediateTarget(alternatePath[currentPathIndex]);
+        }
+
+        /// <summary>
         /// Draw debug information in the editor
         /// </summary>
         private void OnDrawGizmos()
         {
             if (!Application.isPlaying) return;
+            
             #if UNITY_EDITOR
             UnityEditor.Handles.Label(transform.position + Vector3.up * 2, currentState.ToString());
             #endif
+            
             if (target != null)
             {
-                Gizmos.color = Color.yellow;
+                // Draw line to target
+                Gizmos.color = isTargetReachable ? Color.green : Color.yellow;
                 Gizmos.DrawLine(transform.position, target.position);
             }
-        }
-    }
-}
+            
+            // Draw enhanced navigation debug info
+            if (visualizeEnhancedPaths && useEnhancedNavigation)
+            {
+                // Draw intermediate target
+                if (intermediateTarget != null)
+                {
+                    Gizmos.color = Color.magenta;
+                    Gizmos.DrawWireSphere(intermediateTarget.position, intermediateTargetReachedDistance);
+                    Gizmos.DrawLine(transform.position, intermediateTarget.position);
+                    
+                    #if UNITY_EDITOR
+                    UnityEditor.Handles.Label(intermediateTarget.position + Vector3.up * 0.5f, "Intermediate Target");
+                    #endif
+                }
+                
+                // Draw alternate path
+                if (isUsingAlternatePath && alternatePath.Count > 1)
+                {
+                    Gizmos.color = Color.cyan;
+                    for (int i = 0; i < alternatePath.Count - 1; i++)
+                    {
+                        Gizmos.DrawLine(alternatePath[i], alternatePath[i + 1]);
+                        Gizmos.DrawWireSphere(alternatePath[i], 0.2f);
+                    }
+                    Gizmos.DrawWireSphere(alternatePath[alternatePath.Count - 1], 0.2f);
+                    
+                    // Highlight current waypoint
+                    if (currentPathIndex < alternatePath.Count)
+                    {
+                        Gizmos.color = Color.yellow;
+                        Gizmos.DrawWireSphere(alternatePath[currentPathIndex], 0.3f);
+                    }
+                    
+                    #if UNITY_EDITOR
+                    UnityEditor.Handles.Label(transform.position + Vector3.up * 1.5f, "Using Alternate Path");
+                    #endif
+                }
+            }
+        }}}

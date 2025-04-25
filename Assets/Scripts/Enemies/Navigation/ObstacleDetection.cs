@@ -124,7 +124,7 @@ public class ObstacleDetection : MonoBehaviour
             if ((obstacleLayer.value & (1 << col.gameObject.layer)) != 0)
             {
                 // This is a valid obstacle!
-                Debug.Log($"Obstacle detected: {col.name} on layer {LayerMask.LayerToName(col.gameObject.layer)}");
+//                Debug.Log($"Obstacle detected: {col.name} on layer {LayerMask.LayerToName(col.gameObject.layer)}");
                 foundObstacle = true;
                 obstacleCollider = col;
                 break;

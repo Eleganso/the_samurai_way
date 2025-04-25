@@ -192,7 +192,7 @@ namespace Enemies.Navigation
                 }
                 else
                 {
-                    Debug.Log($"Now NOT GROUNDED at position {groundCheck.position}, Layer: {LayerMaskToString(groundLayer)}");
+//                    Debug.Log($"Now NOT GROUNDED at position {groundCheck.position}, Layer: {LayerMaskToString(groundLayer)}");
                 }
             }
             
