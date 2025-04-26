@@ -188,7 +188,7 @@ namespace Enemies.Navigation
             {
                 if (isGrounded)
                 {
-                    Debug.Log($"Now GROUNDED at position {groundCheck.position}");
+//                    Debug.Log($"Now GROUNDED at position {groundCheck.position}");
                 }
                 else
                 {

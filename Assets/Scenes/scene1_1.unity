@@ -2332,8 +2332,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   type: 0
-  connections: []
-  connectionRadius: 5
+  connections:
+  - {fileID: 2046533843}
+  connectionRadius: 25
   autoConnectInRadius: 1
   gizmoColor: {r: 0, g: 1, b: 1, a: 1}
   linkedWaypoint: {fileID: 2110636893}
@@ -2347,7 +2348,7 @@ Transform:
   m_GameObject: {fileID: 789891548}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -133.93, y: 139.48, z: 0}
+  m_LocalPosition: {x: -127.16, y: 139.48, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -2473,6 +2474,12 @@ MonoBehaviour:
   intermediateTargetReachedDistance: 1
   pathRecalculationInterval: 1.5
   visualizeEnhancedPaths: 1
+  avoidedLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  alwaysUseAlternateForAvoidedLayers: 1
+  avoidedLayerCheckFrequency: 0.5
+  debugAvoidanceDecisions: 0
 --- !u!114 &789909939
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2535,7 +2542,7 @@ MonoBehaviour:
   gravityResetDelay: 2
   topLadderSafetyMargin: 2.5
   climbCompletionThreshold: 2
-  exitJumpForce: 22
+  exitJumpForce: 25
   exitHorizontalForce: 2
   debugLadderDetection: 1
 --- !u!114 &789909950
@@ -2551,11 +2558,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   maxPredictionSteps: 20
-  stepDistance: 1
+  stepDistance: 5
   directPathCostWeight: 1
   heightDifferenceWeight: 2
   obstacleCountWeight: 3
-  maxPathfindingDistance: 15
+  maxPathfindingDistance: 50
   visualizePaths: 1
   directPathColor: {r: 0, g: 1, b: 0, a: 1}
   alternatePathColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
@@ -2575,8 +2582,16 @@ MonoBehaviour:
   obstacleLayerMask:
     serializedVersion: 2
     m_Bits: 4160
-  obstacleCheckResolution: 0.25
+  obstacleCheckResolution: 1
+  avoidedLayers:
+    serializedVersion: 2
+    m_Bits: 4160
+  prioritizeAlternatePaths: 1
+  pathRecalculationInterval: 0.5
   visualizePaths: 1
+  directPathColor: {r: 1, g: 1, b: 1, a: 1}
+  avoidedPathColor: {r: 1, g: 0, b: 0, a: 1}
+  alternatePathColor: {r: 0, g: 1, b: 0, a: 1}
 --- !u!1001 &803739208
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -8296,7 +8311,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   type: 0
   connections: []
-  connectionRadius: 5
+  connectionRadius: 25
   autoConnectInRadius: 1
   gizmoColor: {r: 0, g: 1, b: 1, a: 1}
   linkedWaypoint: {fileID: 2140996763}
@@ -8310,7 +8325,7 @@ Transform:
   m_GameObject: {fileID: 1634861620}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -179.05, y: 127.03, z: 0}
+  m_LocalPosition: {x: -186.36, y: 125.05, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -8432,7 +8447,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!4 &1648615863
 Transform:
   m_ObjectHideFlags: 0
@@ -9649,10 +9664,15 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   type: 0
-  connections: []
-  connectionRadius: 5
+  connections:
+  - {fileID: 1634861621}
+  connectionRadius: 15
   autoConnectInRadius: 1
-  gizmoColor: {r: 0, g: 1, b: 1, a: 1}
+  gizmoColor:
+    r: 0
+    g: 1
+    b: 1
+    a: 1
   linkedWaypoint: {fileID: 2110636893}
   costModifier: 1
 --- !u!4 &2013843924
@@ -9664,7 +9684,7 @@ Transform:
   m_GameObject: {fileID: 2013843922}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -178.94, y: 138.59, z: 0}
+  m_LocalPosition: {x: -186.92, y: 138.41, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -9700,8 +9720,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   type: 0
-  connections: []
-  connectionRadius: 5
+  connections:
+  - {fileID: 789891549}
+  connectionRadius: 25
   autoConnectInRadius: 1
   gizmoColor: {r: 0, g: 1, b: 1, a: 1}
   linkedWaypoint: {fileID: 2140996763}
@@ -9715,7 +9736,7 @@ Transform:
   m_GameObject: {fileID: 2046533842}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -140.02, y: 125.91, z: 0}
+  m_LocalPosition: {x: -126.81, y: 125.57, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -9818,8 +9839,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   type: 2
-  connections: []
-  connectionRadius: 5
+  connections:
+  - {fileID: 2140996763}
+  connectionRadius: 25
   autoConnectInRadius: 1
   gizmoColor: {r: 1, g: 0, b: 0, a: 1}
   linkedWaypoint: {fileID: 2140996763}
@@ -10068,8 +10090,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   type: 1
-  connections: []
-  connectionRadius: 5
+  connections:
+  - {fileID: 2110636893}
+  connectionRadius: 25
   autoConnectInRadius: 1
   gizmoColor: {r: 0, g: 0, b: 1, a: 1}
   linkedWaypoint: {fileID: 2110636893}

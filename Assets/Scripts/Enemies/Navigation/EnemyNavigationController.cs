@@ -48,6 +48,12 @@ namespace Enemies.Navigation
         [SerializeField] private float pathRecalculationInterval = 1.5f;
         [SerializeField] private bool visualizeEnhancedPaths = true;
 
+        [Header("Layer Avoidance")]
+        [SerializeField] private LayerMask avoidedLayers; // Layers to always avoid when possible
+        [SerializeField] private bool alwaysUseAlternateForAvoidedLayers = true; // Always prefer waypoints when path crosses avoided layers
+        [SerializeField] private float avoidedLayerCheckFrequency = 0.5f; // How often to check for avoided layers (in seconds)
+        [SerializeField] private bool debugAvoidanceDecisions = false; // Log path avoidance decisions for debugging
+
         // State management
         private NavigationState currentState = NavigationState.Idle;
         private Rigidbody2D rb;
@@ -79,6 +85,10 @@ namespace Enemies.Navigation
         private int currentPathIndex = 0;
         private Transform intermediateTarget = null;
         private float lastPathCalculationTime = 0f;
+
+        // Layer avoidance state
+        private bool isDirectPathThroughAvoidedLayer = false;
+        private float lastAvoidanceCheckTime = 0f;
 
         // Stuck detection
         private float stuckTimer = 0f;
@@ -168,6 +178,17 @@ namespace Enemies.Navigation
                 {
                     Debug.LogWarning("WaypointSystem not found. Enhanced navigation will be limited.");
                 }
+            }
+            
+            // Set avoided layers in the obstacle detector if available
+            var avoidedLayersField = obstacleDetector.GetType().GetField("avoidedLayers", 
+                System.Reflection.BindingFlags.NonPublic | 
+                System.Reflection.BindingFlags.Public | 
+                System.Reflection.BindingFlags.Instance);
+                
+            if (avoidedLayersField != null)
+            {
+                avoidedLayersField.SetValue(obstacleDetector, avoidedLayers);
             }
             
             Debug.Log($"Initial facing direction: {(isFacingRight ? "right" : "left")}");
@@ -298,6 +319,20 @@ namespace Enemies.Navigation
             var hit = Physics2D.Linecast(transform.position, target.position, obstacleLayer);
             isTargetReachable = hit.collider == null || hit.collider.transform == target;
 
+            // Check for layer avoidance (at a lower frequency than the normal update)
+            if (avoidedLayers.value != 0 && Time.time - lastAvoidanceCheckTime >= avoidedLayerCheckFrequency)
+            {
+                lastAvoidanceCheckTime = Time.time;
+                isDirectPathThroughAvoidedLayer = IsDirectPathThroughAvoidedLayer();
+                
+                // If direct path crosses avoided layers and we should use alternate paths
+                if (isDirectPathThroughAvoidedLayer && alwaysUseAlternateForAvoidedLayers)
+                {
+                    // Force evaluation of alternate path
+                    EvaluateAndSetAlternatePath();
+                }
+            }
+
             // Enhanced navigation - handle intermediate targets
             if (useEnhancedNavigation && intermediateTarget != null)
             {
@@ -305,7 +340,15 @@ namespace Enemies.Navigation
                 float distToIntermediate = Vector2.Distance(transform.position, intermediateTarget.position);
                 if (distToIntermediate <= intermediateTargetReachedDistance)
                 {
-                    ClearIntermediateTarget();
+                    // If using alternate path, advance to next waypoint
+                    if (isUsingAlternatePath && currentPathIndex < alternatePath.Count - 1)
+                    {
+                        AdvanceToNextWaypoint();
+                    }
+                    else
+                    {
+                        ClearIntermediateTarget();
+                    }
                 }
             }
 
@@ -316,14 +359,16 @@ namespace Enemies.Navigation
                 {
                     lastPathCalculationTime = Time.time;
                     
-                    // Only recalculate when aggroed and target is unreachable or at different height
+                    // Only recalculate when aggroed and target is unreachable, at different height, 
+                    // or path crosses avoided layers
                     bool aggro = enemyAggro != null ? enemyAggro.IsAggroed : false;
-                    if (aggro && (!isTargetReachable || isTargetAbove))
+                    if (aggro && (!isTargetReachable || isTargetAbove || isDirectPathThroughAvoidedLayer))
                     {
                         EvaluateAndSetAlternatePath();
                     }
-                    else
+                    else if (!isDirectPathThroughAvoidedLayer)
                     {
+                        // Only clear if direct path doesn't cross avoided layers
                         ClearAlternatePath();
                     }
                 }
@@ -375,6 +420,29 @@ namespace Enemies.Navigation
                     rb.linearVelocity = new Vector2(0, rb.linearVelocity.y);
                     break;
             }
+        }
+
+        /// <summary>
+        /// Check if the direct path to the target crosses any layers that should be avoided
+        /// </summary>
+        private bool IsDirectPathThroughAvoidedLayer()
+        {
+            if (avoidedLayers.value == 0 || target == null)
+                return false;
+                
+            // Simple linecast to check if path crosses avoided layers
+            RaycastHit2D hit = Physics2D.Linecast(transform.position, target.position, avoidedLayers);
+            
+            // If we hit something that isn't the target itself, the path crosses an avoided layer
+            bool isAvoided = hit.collider != null && hit.collider.transform != target;
+            
+            if (isAvoided && debugAvoidanceDecisions)
+            {
+                Debug.Log($"Avoiding path through layer: {LayerMask.LayerToName(hit.collider.gameObject.layer)}");
+                Debug.DrawLine(transform.position, hit.point, Color.magenta, 0.5f);
+            }
+            
+            return isAvoided;
         }
 
         /// <summary>
@@ -769,8 +837,11 @@ namespace Enemies.Navigation
             if (waypointSystem == null || target == null)
                 return;
 
-            // Check if direct path is blocked or vertical difference is significant
-            bool isPathDifficult = !isTargetReachable || Mathf.Abs(target.position.y - transform.position.y) > 1.5f;
+            // Check if direct path is blocked, vertical difference is significant,
+            // or the path crosses avoided layers
+            bool isPathDifficult = !isTargetReachable || 
+                                  Mathf.Abs(target.position.y - transform.position.y) > 1.5f || 
+                                  isDirectPathThroughAvoidedLayer;
             
             if (isPathDifficult)
             {
@@ -784,15 +855,41 @@ namespace Enemies.Navigation
                 // If we found a valid path with at least one waypoint
                 if (path.Count > 2) // Start, at least one waypoint, and end
                 {
-                    alternatePath = path;
-                    currentPathIndex = 1; // Index 0 is our starting position
-                    isUsingAlternatePath = true;
+                    // Validate that the path doesn't cross avoided layers
+                    bool pathValid = true;
                     
-                    // Set the first waypoint as an intermediate target
-                    SetIntermediateTarget(alternatePath[currentPathIndex]);
+                    if (avoidedLayers.value != 0)
+                    {
+                        for (int i = 0; i < path.Count - 1; i++)
+                        {
+                            RaycastHit2D hit = Physics2D.Linecast(path[i], path[i+1], avoidedLayers);
+                            if (hit.collider != null)
+                            {
+                                pathValid = false;
+                                if (debugAvoidanceDecisions)
+                                    Debug.Log($"Waypoint path segment {i} crosses avoided layer: {LayerMask.LayerToName(hit.collider.gameObject.layer)}");
+                                break;
+                            }
+                        }
+                    }
                     
-                    Debug.Log($"Set alternate path with {alternatePath.Count - 2} waypoints");
-                    return;
+                    if (pathValid)
+                    {
+                        alternatePath = path;
+                        currentPathIndex = 1; // Index 0 is our starting position
+                        isUsingAlternatePath = true;
+                        
+                        // Set the first waypoint as an intermediate target
+                        SetIntermediateTarget(alternatePath[currentPathIndex]);
+                        
+                        if (debugAvoidanceDecisions)
+                            Debug.Log($"Set alternate path with {alternatePath.Count - 2} waypoints to avoid obstacles/layers");
+                        return;
+                    }
+                    else if (debugAvoidanceDecisions)
+                    {
+                        Debug.Log("Alternate path also crosses avoided layers - using direct path");
+                    }
                 }
             }
             
@@ -805,6 +902,14 @@ namespace Enemies.Navigation
         /// </summary>
         private void ClearAlternatePath()
         {
+            // Don't clear the path if we're still avoiding layers
+            if (isDirectPathThroughAvoidedLayer && alwaysUseAlternateForAvoidedLayers && isUsingAlternatePath)
+            {
+                if (debugAvoidanceDecisions)
+                    Debug.Log("Not clearing alternate path because direct path crosses avoided layers");
+                return;
+            }
+            
             isUsingAlternatePath = false;
             alternatePath.Clear();
             currentPathIndex = 0;
@@ -852,6 +957,9 @@ namespace Enemies.Navigation
             
             currentPathIndex++;
             SetIntermediateTarget(alternatePath[currentPathIndex]);
+            
+            if (debugAvoidanceDecisions)
+                Debug.Log($"Advanced to waypoint {currentPathIndex} of {alternatePath.Count-1}");
         }
 
         /// <summary>
@@ -868,8 +976,23 @@ namespace Enemies.Navigation
             if (target != null)
             {
                 // Draw line to target
-                Gizmos.color = isTargetReachable ? Color.green : Color.yellow;
-                Gizmos.DrawLine(transform.position, target.position);
+                if (isDirectPathThroughAvoidedLayer)
+                {
+                    // Draw path in red/magenta if it crosses avoided layers
+                    Gizmos.color = new Color(1f, 0f, 1f, 0.8f); // Magenta
+                    Gizmos.DrawLine(transform.position, target.position);
+                    
+                    #if UNITY_EDITOR
+                    Vector3 midPoint = (transform.position + target.position) * 0.5f;
+                    UnityEditor.Handles.Label(midPoint, "Avoided Layer");
+                    #endif
+                }
+                else
+                {
+                    // Standard path color based on reachability
+                    Gizmos.color = isTargetReachable ? Color.green : Color.yellow;
+                    Gizmos.DrawLine(transform.position, target.position);
+                }
             }
             
             // Draw enhanced navigation debug info
@@ -890,7 +1013,9 @@ namespace Enemies.Navigation
                 // Draw alternate path
                 if (isUsingAlternatePath && alternatePath.Count > 1)
                 {
-                    Gizmos.color = Color.cyan;
+                    // Use a brighter color if we're using the path to avoid layers
+                    Gizmos.color = isDirectPathThroughAvoidedLayer ? Color.green : Color.cyan;
+                    
                     for (int i = 0; i < alternatePath.Count - 1; i++)
                     {
                         Gizmos.DrawLine(alternatePath[i], alternatePath[i + 1]);
@@ -906,8 +1031,45 @@ namespace Enemies.Navigation
                     }
                     
                     #if UNITY_EDITOR
-                    UnityEditor.Handles.Label(transform.position + Vector3.up * 1.5f, "Using Alternate Path");
+                    string pathReason = isDirectPathThroughAvoidedLayer ? 
+                        "Avoiding Layer" : "Using Alternate Path";
+                    UnityEditor.Handles.Label(transform.position + Vector3.up * 1.5f, pathReason);
                     #endif
                 }
+                
+                // Draw avoided layer visualization
+                if (avoidedLayers.value != 0 && debugAvoidanceDecisions)
+                {
+                    // Highlight any nearby avoided layers
+                    Collider2D[] avoidedColliders = Physics2D.OverlapCircleAll(
+                        transform.position, 
+                        waypointDetectionRadius,
+                        avoidedLayers
+                    );
+                    
+                    foreach (Collider2D coll in avoidedColliders)
+                    {
+                        Gizmos.color = new Color(1f, 0f, 1f, 0.3f); // Semi-transparent magenta
+                        
+                        if (coll is BoxCollider2D box)
+                        {
+                            // Draw box outline
+                            Gizmos.DrawWireCube(box.bounds.center, box.bounds.size);
+                        }
+                        else
+                        {
+                            // Draw generic outline for other collider types
+                            Gizmos.DrawWireSphere(coll.bounds.center, 
+                                                 Mathf.Max(coll.bounds.extents.x, coll.bounds.extents.y));
+                        }
+                        
+                        #if UNITY_EDITOR
+                        UnityEditor.Handles.Label(coll.bounds.center, 
+                            $"Layer: {LayerMask.LayerToName(coll.gameObject.layer)}");
+                        #endif
+                    }
+                }
             }
-        }}}
+        }
+    }
+}

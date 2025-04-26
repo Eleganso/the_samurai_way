@@ -10,6 +10,9 @@ public class ObstacleDetection : MonoBehaviour
     private float edgeDetectionDistance;
     private LayerMask groundLayer;
     private LayerMask obstacleLayer;
+    
+    [SerializeField] private LayerMask avoidedLayers; // NEW: Layers that should be avoided if possible
+    [SerializeField] private bool debugLayerDetection = false; // NEW: Debug flag for showing layer detection
 
     // Jump obstacle data
     private readonly RaycastHit2D[] jumpHeightResults = new RaycastHit2D[5];
@@ -29,56 +32,56 @@ public class ObstacleDetection : MonoBehaviour
     }
 
     public bool IsGrounded()
-{
-    if (groundCheckTransform == null) return false;
-    
-    // APPROACH 1: Larger detection circle
-    Collider2D[] colliders = Physics2D.OverlapCircleAll(
-        groundCheckTransform.position, 
-        1.5f,  // Much larger radius to ensure ground detection
-        groundLayer
-    );
-    
-    foreach (Collider2D col in colliders)
     {
-        // Skip if it's the enemy itself or a trigger
-        if (col.transform == enemyTransform || 
-            col.transform.IsChildOf(enemyTransform) || 
-            col.isTrigger)
-            continue;
+        if (groundCheckTransform == null) return false;
         
-        // Ground detected!
-        Debug.DrawLine(groundCheckTransform.position, col.transform.position, Color.green);
-        return true;
-    }
-    
-    // APPROACH 2: Multiple downward raycasts with offset
-    float[] horizontalOffsets = new float[] { -1.0f, -0.5f, 0f, 0.5f, 1.0f };
-    
-    foreach (float offset in horizontalOffsets)
-    {
-        Vector2 rayOrigin = (Vector2)groundCheckTransform.position + new Vector2(offset, 0f);
-        RaycastHit2D hit = Physics2D.Raycast(
-            rayOrigin,
-            Vector2.down,
-            1.2f,  // Check further down
+        // APPROACH 1: Larger detection circle
+        Collider2D[] colliders = Physics2D.OverlapCircleAll(
+            groundCheckTransform.position, 
+            1.5f,  // Much larger radius to ensure ground detection
             groundLayer
         );
         
-        // Visual debugging
-        Debug.DrawRay(rayOrigin, Vector2.down * 1.2f, hit.collider != null ? Color.green : Color.red);
-        
-        if (hit.collider != null && 
-            hit.collider.transform != enemyTransform && 
-            !hit.collider.transform.IsChildOf(enemyTransform))
+        foreach (Collider2D col in colliders)
         {
+            // Skip if it's the enemy itself or a trigger
+            if (col.transform == enemyTransform || 
+                col.transform.IsChildOf(enemyTransform) || 
+                col.isTrigger)
+                continue;
+            
+            // Ground detected!
+            Debug.DrawLine(groundCheckTransform.position, col.transform.position, Color.green);
             return true;
         }
+        
+        // APPROACH 2: Multiple downward raycasts with offset
+        float[] horizontalOffsets = new float[] { -1.0f, -0.5f, 0f, 0.5f, 1.0f };
+        
+        foreach (float offset in horizontalOffsets)
+        {
+            Vector2 rayOrigin = (Vector2)groundCheckTransform.position + new Vector2(offset, 0f);
+            RaycastHit2D hit = Physics2D.Raycast(
+                rayOrigin,
+                Vector2.down,
+                1.2f,  // Check further down
+                groundLayer
+            );
+            
+            // Visual debugging
+            Debug.DrawRay(rayOrigin, Vector2.down * 1.2f, hit.collider != null ? Color.green : Color.red);
+            
+            if (hit.collider != null && 
+                hit.collider.transform != enemyTransform && 
+                !hit.collider.transform.IsChildOf(enemyTransform))
+            {
+                return true;
+            }
+        }
+        
+        // No valid ground found
+        return false;
     }
-    
-    // No valid ground found
-    return false;
-}
 
     public bool IsObstacleAhead(bool isFacingRight)
     {
@@ -124,7 +127,6 @@ public class ObstacleDetection : MonoBehaviour
             if ((obstacleLayer.value & (1 << col.gameObject.layer)) != 0)
             {
                 // This is a valid obstacle!
-//                Debug.Log($"Obstacle detected: {col.name} on layer {LayerMask.LayerToName(col.gameObject.layer)}");
                 foundObstacle = true;
                 obstacleCollider = col;
                 break;
@@ -141,7 +143,6 @@ public class ObstacleDetection : MonoBehaviour
             }
             else
             {
-              //  Debug.Log($"Raycast hit obstacle: {hit.collider.name} at distance {hit.distance}");
                 // Use this as a fallback if the first method fails
                 if (!foundObstacle)
                 {
@@ -161,6 +162,44 @@ public class ObstacleDetection : MonoBehaviour
         }
         
         return foundObstacle;
+    }
+
+    // NEW: Check if there are avoided layers in our path
+    public bool IsAvoidedLayerAhead(bool isFacingRight, float distance = -1)
+    {
+        // If no avoided layers set, always return false
+        if (avoidedLayers.value == 0)
+            return false;
+            
+        Vector2 direction = isFacingRight ? Vector2.right : Vector2.left;
+        Vector2 origin;
+        
+        if (wallCheckTransform != null)
+        {
+            origin = wallCheckTransform.position;
+        }
+        else
+        {
+            origin = (Vector2)enemyTransform.position + new Vector2(isFacingRight ? 0.25f : -0.25f, 0);
+        }
+        
+        // Use the specified distance or default to obstacle detection distance
+        float checkDistance = distance > 0 ? distance : obstacleDetectionDistance;
+        
+        // Check for avoided layers with a raycast
+        RaycastHit2D hit = Physics2D.Raycast(origin, direction, checkDistance, avoidedLayers);
+        
+        if (hit.collider != null)
+        {
+            if (debugLayerDetection)
+            {
+                Debug.DrawLine(origin, hit.point, Color.red);
+                Debug.Log($"Detected avoided layer: {LayerMask.LayerToName(hit.collider.gameObject.layer)}");
+            }
+            return true;
+        }
+        
+        return false;
     }
 
     public bool IsEdgeAhead(bool isFacingRight)
@@ -223,12 +262,14 @@ public class ObstacleDetection : MonoBehaviour
         {
             if (jumpHeightResults[i].collider == null)
             {
-                Debug.Log($"Found clear jump height at offset {jumpHeightOffsets[i]}");
+                if (debugLayerDetection)
+                    Debug.Log($"Found clear jump height at offset {jumpHeightOffsets[i]}");
                 return jumpHeightOffsets[i];
             }
         }
         
-        Debug.Log("Cannot jump over this obstacle");
+        if (debugLayerDetection)
+            Debug.Log("Cannot jump over this obstacle");
         return 0; // Can't jump over this obstacle
     }
 
@@ -258,52 +299,82 @@ public class ObstacleDetection : MonoBehaviour
         return 0; // No edge found within 5 units
     }
 
-    private void OnDrawGizmos()
-{
-    if (!Application.isPlaying || enemyTransform == null) return;
-
-    // Draw ground check
-    if (groundCheckTransform != null)
+    // NEW: Set the avoided layers at runtime
+    public void SetAvoidedLayers(LayerMask layers)
     {
-        // Draw the large circle for ground detection
-        Gizmos.color = IsGrounded() ? Color.green : Color.red;
-        Gizmos.DrawWireSphere(groundCheckTransform.position, 1.5f);
-        
-        // Also visualize the raycast positions
-        float[] horizontalOffsets = new float[] { -1.0f, -0.5f, 0f, 0.5f, 1.0f };
-        
-        foreach (float offset in horizontalOffsets)
+        avoidedLayers = layers;
+    }
+    
+    // NEW: Get layer info at a point
+    public int GetLayerAtPoint(Vector2 point)
+    {
+        Collider2D col = Physics2D.OverlapPoint(point);
+        return col != null ? col.gameObject.layer : -1;
+    }
+
+    private void OnDrawGizmos()
+    {
+        if (!Application.isPlaying || enemyTransform == null) return;
+
+        // Draw ground check
+        if (groundCheckTransform != null)
         {
-            Vector2 rayOrigin = (Vector2)groundCheckTransform.position + new Vector2(offset, 0f);
+            // Draw the large circle for ground detection
+            Gizmos.color = IsGrounded() ? Color.green : Color.red;
+            Gizmos.DrawWireSphere(groundCheckTransform.position, 1.5f);
             
-            // Only draw these additional visualizations in play mode
-            if (Application.isPlaying)
+            // Also visualize the raycast positions
+            float[] horizontalOffsets = new float[] { -1.0f, -0.5f, 0f, 0.5f, 1.0f };
+            
+            foreach (float offset in horizontalOffsets)
             {
-                RaycastHit2D hit = Physics2D.Raycast(rayOrigin, Vector2.down, 1.2f, groundLayer);
-                Gizmos.color = hit.collider != null ? Color.green : Color.yellow;
-                Gizmos.DrawLine(rayOrigin, rayOrigin + Vector2.down * 1.2f);
+                Vector2 rayOrigin = (Vector2)groundCheckTransform.position + new Vector2(offset, 0f);
+                
+                // Only draw these additional visualizations in play mode
+                if (Application.isPlaying)
+                {
+                    RaycastHit2D hit = Physics2D.Raycast(rayOrigin, Vector2.down, 1.2f, groundLayer);
+                    Gizmos.color = hit.collider != null ? Color.green : Color.yellow;
+                    Gizmos.DrawLine(rayOrigin, rayOrigin + Vector2.down * 1.2f);
+                }
             }
         }
-    }
-    
-    // Rest of the method remains unchanged
-    if (wallCheckTransform != null)
-    {
-        Vector2 direction = transform.localScale.x > 0 ? Vector2.right : Vector2.left;
-        Vector2 origin = wallCheckTransform.position;
-        Gizmos.color = IsObstacleAhead(transform.localScale.x > 0) ? Color.red : Color.green;
-        Gizmos.DrawRay(origin, direction * obstacleDetectionDistance);
-    }
-    
-    if (groundCheckTransform != null)
-    {
-        Vector2 direction = transform.localScale.x > 0 ? Vector2.right : Vector2.left;
-        Vector2 origin = groundCheckTransform.position;
-        Vector2 edgeCheckPoint = origin + direction * edgeDetectionDistance;
         
-        Gizmos.color = IsEdgeAhead(transform.localScale.x > 0) ? Color.yellow : Color.green;
-        Gizmos.DrawLine(origin, edgeCheckPoint);
-        Gizmos.DrawRay(edgeCheckPoint, Vector2.down);
-    }
-}
-}
+        // Draw obstacle detection
+        if (wallCheckTransform != null)
+        {
+            Vector2 direction = transform.localScale.x > 0 ? Vector2.right : Vector2.left;
+            Vector2 origin = wallCheckTransform.position;
+            
+            bool isObstacle = IsObstacleAhead(transform.localScale.x > 0);
+            Gizmos.color = isObstacle ? Color.red : Color.green;
+            Gizmos.DrawRay(origin, direction * obstacleDetectionDistance);
+            
+            // NEW: Draw avoided layer detection
+            if (avoidedLayers.value != 0)
+            {
+                bool isAvoidedLayer = IsAvoidedLayerAhead(transform.localScale.x > 0);
+                if (isAvoidedLayer)
+                {
+                    Gizmos.color = new Color(1, 0, 1, 0.5f); // Purple
+                    Gizmos.DrawRay(origin, direction * obstacleDetectionDistance * 1.2f);
+                    
+                    #if UNITY_EDITOR
+                    UnityEditor.Handles.Label(origin + direction * obstacleDetectionDistance * 0.5f, "Avoided Layer");
+                    #endif
+                }
+            }
+        }
+        
+        // Draw edge detection rays
+        if (groundCheckTransform != null)
+        {
+            Vector2 direction = transform.localScale.x > 0 ? Vector2.right : Vector2.left;
+            Vector2 origin = groundCheckTransform.position;
+            Vector2 edgeCheckPoint = origin + direction * edgeDetectionDistance;
+            
+            Gizmos.color = IsEdgeAhead(transform.localScale.x > 0) ? Color.yellow : Color.green;
+            Gizmos.DrawLine(origin, edgeCheckPoint);
+            Gizmos.DrawRay(edgeCheckPoint, Vector2.down);
+        }
+    }}

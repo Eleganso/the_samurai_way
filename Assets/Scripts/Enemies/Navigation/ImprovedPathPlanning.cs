@@ -5,16 +5,31 @@ namespace Enemies.Navigation
 {
     public class ImprovedPathPlanning : MonoBehaviour
     {
+        [Header("Obstacle Detection")]
         [SerializeField] private LayerMask obstacleLayerMask; // Ground and wall layers
         [SerializeField] private float obstacleCheckResolution = 0.25f; // Distance between path checks
+        
+        [Header("Path Avoidance")]
+        [SerializeField] private LayerMask avoidedLayers; // Specific layers to ALWAYS avoid
+        [SerializeField] private bool prioritizeAlternatePaths = true; // Always prefer alternate paths when direct crosses avoided layers
+        [SerializeField] private float pathRecalculationInterval = 0.5f; // How often to recalculate paths (seconds)
+        
+        [Header("Debug")]
         [SerializeField] private bool visualizePaths = true;
+        [SerializeField] private Color directPathColor = Color.white;
+        [SerializeField] private Color avoidedPathColor = Color.red;
+        [SerializeField] private Color alternatePathColor = Color.green;
         
         private WaypointSystem waypointSystem;
         private EnemyNavigationController navigationController;
         
         private bool isDirectPathBlocked = false;
+        private bool isDirectPathCrossingAvoidedLayers = false;
         private List<Vector2> currentPath = new List<Vector2>();
         private int currentPathIndex = 0;
+        
+        // Path evaluation timing
+        private float lastPathEvaluationTime = 0f;
         
         // Cache for debugging
         private Vector2 lastStartPos;
@@ -30,6 +45,9 @@ namespace Enemies.Navigation
             {
                 Debug.LogWarning("WaypointSystem not found! Path planning will be limited.");
             }
+            
+            // Force immediate path calculation
+            lastPathEvaluationTime = -pathRecalculationInterval;
         }
         
         private void Update()
@@ -40,25 +58,39 @@ namespace Enemies.Navigation
             Transform target = GetTargetFromNavigationController();
             if (target == null) return;
             
-            // Check if direct path is blocked
-            Vector2 startPos = transform.position;
-            Vector2 targetPos = target.position;
-            
-            // Only recalculate path periodically or when positions change significantly
-            if (ShouldRecalculatePath(startPos, targetPos))
+            // Check if it's time to recalculate path
+            if (Time.time - lastPathEvaluationTime >= pathRecalculationInterval)
             {
+                lastPathEvaluationTime = Time.time;
+                
+                // Check if direct path is blocked or crosses avoided layers
+                Vector2 startPos = transform.position;
+                Vector2 targetPos = target.position;
+                
+                // Check direct path status
                 isDirectPathBlocked = IsPathBlocked(startPos, targetPos);
+                isDirectPathCrossingAvoidedLayers = IsPathCrossingAvoidedLayers(startPos, targetPos);
+                
                 lastStartPos = startPos;
                 lastTargetPos = targetPos;
-                lastPathResult = isDirectPathBlocked;
+                lastPathResult = isDirectPathBlocked || isDirectPathCrossingAvoidedLayers;
                 
-                // If direct path is blocked, find alternate path using waypoints
-                if (isDirectPathBlocked && waypointSystem != null)
+                // Determine if we should use alternate path
+                bool shouldUseAlternatePath = ShouldUseAlternatePath();
+                
+                if (shouldUseAlternatePath)
                 {
-                    FindAndSetAlternatePath(startPos, targetPos);
+                    // If we don't already have a path, or if the path needs refreshing
+                    if (currentPath.Count <= 1 || 
+                        Vector2.Distance(startPos, currentPath[0]) > 1.0f ||
+                        Vector2.Distance(targetPos, currentPath[currentPath.Count-1]) > 1.0f)
+                    {
+                        FindAndSetAlternatePath(startPos, targetPos);
+                    }
                 }
                 else
                 {
+                    // Clear path if we should be taking direct route
                     ClearPath();
                 }
             }
@@ -67,13 +99,17 @@ namespace Enemies.Navigation
             FollowCurrentPath();
         }
         
-        private bool ShouldRecalculatePath(Vector2 startPos, Vector2 targetPos)
+        private bool ShouldUseAlternatePath()
         {
-            // Recalculate if positions have changed significantly
-            float startDifference = Vector2.Distance(startPos, lastStartPos);
-            float targetDifference = Vector2.Distance(targetPos, lastTargetPos);
+            // Always use alternate path if direct path crosses avoided layers
+            if (isDirectPathCrossingAvoidedLayers && prioritizeAlternatePaths)
+                return true;
             
-            return startDifference > 1f || targetDifference > 1f || Time.frameCount % 30 == 0;
+            // Use alternate path if direct path is blocked
+            if (isDirectPathBlocked)
+                return true;
+            
+            return false;
         }
         
         private bool IsPathBlocked(Vector2 startPos, Vector2 targetPos)
@@ -99,6 +135,48 @@ namespace Enemies.Navigation
             return hit.collider != null;
         }
         
+        private bool IsPathCrossingAvoidedLayers(Vector2 startPos, Vector2 targetPos)
+        {
+            // No avoided layers configured
+            if (avoidedLayers.value == 0)
+                return false;
+                
+            // Check if the target itself is on an avoided layer (don't count that)
+            Transform target = GetTargetFromNavigationController();
+            
+            // Use linecast for more accurate detection of crossed layers
+            RaycastHit2D hit = Physics2D.Linecast(startPos, targetPos, avoidedLayers);
+            
+            // If we hit something that isn't the target, it's an avoided layer
+            if (hit.collider != null && (target == null || hit.collider.transform != target))
+            {
+                Debug.Log($"Avoiding path through layer: {LayerMask.LayerToName(hit.collider.gameObject.layer)}");
+                return true;
+            }
+            
+            // For more complex situations, check multiple points along the path
+            Vector2 direction = (targetPos - startPos);
+            float distance = direction.magnitude;
+            direction.Normalize();
+            
+            int numChecks = Mathf.CeilToInt(distance / obstacleCheckResolution);
+            
+            for (int i = 1; i < numChecks; i++) // Skip start point
+            {
+                float t = i / (float)numChecks;
+                Vector2 checkPoint = Vector2.Lerp(startPos, targetPos, t);
+                
+                // Check if this point is inside an avoided layer
+                Collider2D overlapCollider = Physics2D.OverlapPoint(checkPoint, avoidedLayers);
+                if (overlapCollider != null && (target == null || overlapCollider.transform != target))
+                {
+                    return true;
+                }
+            }
+            
+            return false;
+        }
+        
         private void FindAndSetAlternatePath(Vector2 startPos, Vector2 targetPos)
         {
             // Use waypoint system to find path
@@ -106,15 +184,45 @@ namespace Enemies.Navigation
             
             if (currentPath.Count > 1)
             {
-                // Path found, set first waypoint as intermediate target
-                currentPathIndex = 1; // Skip the first point (our position)
-                SetIntermediateTarget(currentPath[currentPathIndex]);
+                // Validate that alternate path doesn't cross avoided layers
+                bool isAlternatePathValid = ValidateAlternatePath(currentPath);
+                
+                if (isAlternatePathValid)
+                {
+                    // Path found, set first waypoint as intermediate target
+                    currentPathIndex = 1; // Skip the first point (our position)
+                    SetIntermediateTarget(currentPath[currentPathIndex]);
+                    Debug.Log($"Set alternate path with {currentPath.Count-2} waypoints");
+                }
+                else
+                {
+                    Debug.LogWarning("Alternate path also crosses avoided layers, clearing path");
+                    ClearPath();
+                }
             }
             else
             {
                 // No path found, fall back to direct movement
                 ClearPath();
             }
+        }
+        
+        private bool ValidateAlternatePath(List<Vector2> path)
+        {
+            // If no avoided layers set, path is always valid
+            if (avoidedLayers.value == 0)
+                return true;
+                
+            // Check each segment of the path
+            for (int i = 0; i < path.Count - 1; i++)
+            {
+                if (IsPathCrossingAvoidedLayers(path[i], path[i+1]))
+                {
+                    return false; // Path segment crosses avoided layers
+                }
+            }
+            
+            return true; // All segments are valid
         }
         
         private void ClearPath()
@@ -166,6 +274,9 @@ namespace Enemies.Navigation
         
         private void SetIntermediateTarget(Vector2 position)
         {
+            // Clean up any existing intermediate target first
+            ClearIntermediateTarget();
+            
             // Create a temporary object at this position
             GameObject tempTarget = new GameObject("IntermediateTarget");
             tempTarget.transform.position = position;
@@ -211,7 +322,7 @@ namespace Enemies.Navigation
             // Draw current path
             if (currentPath.Count > 1)
             {
-                Gizmos.color = Color.green;
+                Gizmos.color = alternatePathColor;
                 for (int i = 0; i < currentPath.Count - 1; i++)
                 {
                     Gizmos.DrawLine(currentPath[i], currentPath[i + 1]);
@@ -230,8 +341,20 @@ namespace Enemies.Navigation
             // Draw direct path and show if it's blocked
             if (lastStartPos != Vector2.zero && lastTargetPos != Vector2.zero)
             {
-                Gizmos.color = lastPathResult ? Color.red : Color.white;
+                Gizmos.color = lastPathResult ? avoidedPathColor : directPathColor;
                 Gizmos.DrawLine(lastStartPos, lastTargetPos);
+                
+                // Indicate specifically if it's an avoided path
+                if (isDirectPathCrossingAvoidedLayers)
+                {
+                    Gizmos.color = Color.red;
+                    Vector2 midpoint = (lastStartPos + lastTargetPos) / 2;
+                    Gizmos.DrawWireSphere(midpoint, 0.3f);
+                    
+                    #if UNITY_EDITOR
+                    UnityEditor.Handles.Label(midpoint, "Avoided Layer");
+                    #endif
+                }
             }
         }
     }
