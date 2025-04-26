@@ -11,29 +11,41 @@ namespace Enemies.Navigation
         private float climbSpeed;
         private LayerMask ladderLayer;
         private float ladderCheckRadius;
-        
+
         private bool isClimbing = false;
         private bool wasOnLadder = false;
         private float originalGravity;
         private bool isAtTopOfLadder = false;
         private float lastLadderY = 0f;
         private float topLadderBuffer = 0.5f; // Buffer zone at the top of ladder
-        
+
+        // Grace-period support for forgiving ladder detection
+        [SerializeField] private float ladderGracePeriod = 0.2f;    // seconds to remain "on ladder" after losing overlap
+        private float lastLadderContactTime = 0f;
+
         // Add target reference to find player
         private Transform target;
+
+        [SerializeField] private float gravityResetDelay = 2f;        // Delay before resetting gravity
+        [SerializeField] private float topLadderSafetyMargin = 0.5f; // Extend detection at top
+        [SerializeField] private float climbCompletionThreshold = 2.0f; // Height above ladder to finish
+
+        [Header("Ladder Exit Jump Settings")]
+        [SerializeField] private float exitJumpForce = 8f;           // Jump force when exiting ladder
+        [SerializeField] private float exitHorizontalForce = 3f;     // Horizontal push when exiting ladder
         
-        [SerializeField] private float gravityResetDelay = 2f;  // Delay before resetting gravity
-        [SerializeField] private float topLadderSafetyMargin = 0.5f; // How far to extend detection at top
-        [SerializeField] private float climbCompletionThreshold = 2.0f; // Distance above ladder to consider climbing complete
         private Coroutine gravityResetCoroutine;
         private Collider2D currentLadderCollider;
         private float ladderTopPosition = 0f;
         private float timeAtLadderTop = 0f;
+        
+        // Keep for potential future use
+        private Vector3 lastPosition;
 
-        // Debug/visualization properties
+        // Debug/visualization
         [SerializeField] private bool debugLadderDetection = true;
 
-        public void Initialize(Rigidbody2D rigidbody, Animator anim, Transform ladderCheck, 
+        public void Initialize(Rigidbody2D rigidbody, Animator anim, Transform ladderCheck,
                               float speed, LayerMask ladders, float radius)
         {
             rb = rigidbody;
@@ -42,11 +54,11 @@ namespace Enemies.Navigation
             climbSpeed = speed;
             ladderLayer = ladders;
             ladderCheckRadius = radius;
-            
+
             // Store the original gravity scale
             originalGravity = rb.gravityScale;
             Debug.Log($"ClimbController initialized with original gravity: {originalGravity}");
-            
+
             // Find player target if not already set
             if (target == null)
             {
@@ -54,23 +66,22 @@ namespace Enemies.Navigation
             }
         }
 
-        // Called every frame to check for ladder exit conditions
         private void Update()
         {
             if (isClimbing)
             {
-                // Get the bottom of the LadderCheck collider (assuming it's a CapsuleCollider2D for full height)
+                // Get the bottom of the LadderCheck collider
                 Collider2D ladderCheckCollider = ladderCheckTransform.GetComponent<Collider2D>();
                 if (ladderCheckCollider != null)
                 {
                     float ladderCheckBottom = ladderCheckCollider.bounds.min.y;
-                    
-                    // If the bottom of our LadderCheck is above the ladder top, we've fully exited
+
+                    // If bottom is above ladder top + small margin, we've exited
                     if (ladderCheckBottom > ladderTopPosition + 0.1f)
                     {
                         timeAtLadderTop += Time.deltaTime;
-                        
-                        if (timeAtLadderTop > 0.2f) // Short delay to ensure stable detection
+
+                        if (timeAtLadderTop > 0.2f) // stable detection delay
                         {
                             Debug.Log($"LadderCheck fully cleared ladder. Bottom: {ladderCheckBottom}, Ladder top: {ladderTopPosition}");
                             CompleteClimbing();
@@ -82,168 +93,181 @@ namespace Enemies.Navigation
                         timeAtLadderTop = 0f;
                     }
                 }
+                
+                // Update last position for potential future use
+                lastPosition = transform.position;
             }
         }
 
-        // New method to complete climbing and transition to walking
         private void CompleteClimbing()
         {
             Debug.Log("Completing climb - LadderCheck fully cleared ladder");
-            
-            // Reset climbing state
+
             isClimbing = false;
             isAtTopOfLadder = false;
-            
+
             // Restore gravity
             rb.gravityScale = originalGravity;
+
+            // Always force a jump when completing the climb
+            Debug.Log("Forcing jump on ladder exit");
+            JumpAfterClimb();
+
+            // Note: We don't call navController.LadderClimbCompleted() here 
+            // because the jump will handle the state transition
+        }
+
+        // Add this new method for the direct jump after climbing
+        private void JumpAfterClimb()
+        {
+            // Get target direction for the jump
+            float horizontalDirection = 1f;
+            if (target != null)
+            {
+                horizontalDirection = (target.position.x > transform.position.x) ? 1f : -1f;
+            }
+
+            // Apply jump force - use higher values to ensure the jump is effective
+            rb.linearVelocity = new Vector2(horizontalDirection * exitHorizontalForce, exitJumpForce);
             
-            // Notify the navigation controller
+            // Make sure gravity is restored
+            rb.gravityScale = originalGravity;
+
+            // Notify navigation controller to change state
             EnemyNavigationController navController = GetComponent<EnemyNavigationController>();
             if (navController != null)
             {
-                navController.LadderClimbCompleted();
+                // Force change to jumping state
+                navController.ForceStateChange(NavigationState.Jumping);
+                
+                // Also try direct call to existing jump controller if available
+                JumpController jumpController = GetComponent<JumpController>();
+                if (jumpController != null)
+                {
+                    // Execute jump through the jump controller
+                    jumpController.ExecuteJump();
+                    Debug.Log("Executed jump using JumpController after ladder climb");
+                }
             }
         }
 
         public bool IsLadderDetected()
         {
             bool detected = false;
-            
-            // Check for ladder collider
-            Collider2D ladderCollider = null;
-            
+
+            // Use a much larger radius for ladder detection
+            float detectionMultiplier = 0.5f; // Increased from 1.5f
+
             if (ladderCheckTransform != null)
             {
-                // Use the designated ladderCheck transform
-                ladderCollider = Physics2D.OverlapCircle(ladderCheckTransform.position, ladderCheckRadius * 1.5f, ladderLayer);
-            }
-            else
-            {
-                // Fallback to a calculated position
-                Vector2 handsPosition = (Vector2)transform.position + new Vector2(0, 0.5f);
-                ladderCollider = Physics2D.OverlapCircle(handsPosition, ladderCheckRadius * 1.5f, ladderLayer);
-            }
-            
-            if (ladderCollider != null)
-            {
-                detected = true;
-                currentLadderCollider = ladderCollider;
-                
-                // Store ladder top position
-                ladderTopPosition = ladderCollider.bounds.max.y;
-                lastLadderY = ladderTopPosition;
-                
-                if (debugLadderDetection)
+                // Multiple check points along ladder height
+                Vector3[] checkPositions = new Vector3[]
                 {
-                    Collider2D ladderCheckCollider = ladderCheckTransform.GetComponent<Collider2D>();
-                    float ladderCheckBottom = ladderCheckCollider != null ? ladderCheckCollider.bounds.min.y : transform.position.y;
-                    
-                    Debug.Log($"Ladder detected! Ladder top: {ladderTopPosition}, LadderCheck bottom: {ladderCheckBottom}");
-                }
-            }
-            else if (isClimbing)
-            {
-                // If we're climbing but don't detect a ladder anymore,
-                // continue climbing until LadderCheck fully clears the ladder
-                Collider2D ladderCheckCollider = ladderCheckTransform.GetComponent<Collider2D>();
-                if (ladderCheckCollider != null)
+                    ladderCheckTransform.position,
+                    ladderCheckTransform.position + Vector3.up * 0.5f,
+                    ladderCheckTransform.position + Vector3.down * 0.5f
+                };
+
+                foreach (Vector3 checkPos in checkPositions)
                 {
-                    float ladderCheckBottom = ladderCheckCollider.bounds.min.y;
-                    
-                    if (ladderCheckBottom <= ladderTopPosition)
+                    Collider2D ladderCollider = Physics2D.OverlapCircle(
+                        checkPos,
+                        ladderCheckRadius * detectionMultiplier,
+                        ladderLayer
+                    );
+
+                    if (ladderCollider != null)
                     {
-                        // We're still exiting the ladder
                         detected = true;
-                        if (debugLadderDetection)
-                        {
-                            Debug.Log($"Still exiting ladder. LadderCheck bottom: {ladderCheckBottom}, Ladder top: {ladderTopPosition}");
-                        }
+                        currentLadderCollider = ladderCollider;
+                        ladderTopPosition = ladderCollider.bounds.max.y;
+                        lastLadderY = ladderTopPosition;
+                        break;
                     }
                 }
             }
-            
+
+            // If already climbing, allow a short grace period after losing contact
+            if (!detected && isClimbing)
+            {
+                detected = (Time.time - lastLadderContactTime) < ladderGracePeriod;
+            }
+
+            if (detected)
+            {
+                lastLadderContactTime = Time.time;
+            }
+
             return detected;
         }
-        
+
         public void ExecuteClimb(float targetY)
         {
             bool currentlyOnLadder = IsLadderDetected();
-            
-            // If we weren't climbing but now we should, start climbing
+
+            // If starting climb
             if (!isClimbing && currentlyOnLadder)
             {
                 StartClimbing();
             }
-            
-            // If we are in climbing state
+
             if (isClimbing)
             {
                 if (currentlyOnLadder)
                 {
-                    // Continue climbing upward
+                    // Continue climbing
                     rb.gravityScale = 0;
                     rb.linearVelocity = new Vector2(0, climbSpeed);
                     UpdateClimbingAnimation(1.0f);
                 }
-                else
-                {
-                    // We're no longer on the ladder
-                    // This will be handled by the Update method and CompleteClimbing
-                }
+                // else: let Update() handle when we've exited
             }
-            
-            // Update ladder state for next frame
+
             wasOnLadder = currentlyOnLadder;
         }
-        
+
         private void UpdateClimbingAnimation(float verticalDirection)
         {
             if (animator == null) return;
-            
+
             if (Mathf.Abs(verticalDirection) > 0.1f)
             {
-                animator.speed = 1.0f; // Normal animation speed when moving
+                animator.speed = 1.0f;
                 if (verticalDirection > 0)
-                {
                     animator.Play("ClimbUp");
-                }
                 else
-                {
                     animator.Play("ClimbDown");
-                }
             }
             else
             {
-                animator.speed = 0f; // Pause animation when not moving on ladder
+                animator.speed = 0f;
             }
         }
-        
+
         private void StartClimbing()
         {
             isClimbing = true;
-            rb.gravityScale = 0; // Disable gravity while climbing
+            rb.gravityScale = 0;
             timeAtLadderTop = 0f;
-            
-            // Cancel any pending gravity reset
             CancelGravityReset();
-            
+
+            // Reset position tracking
+            lastPosition = transform.position;
+
             if (animator != null)
-            {
                 animator.SetBool("isClimbing", true);
-            }
-            
+
             Debug.Log($"Started climbing. Gravity set to 0 (from {originalGravity})");
         }
-        
+
         private void StartDelayedGravityReset()
         {
-            // Only start a new coroutine if one isn't already running
             if (gravityResetCoroutine == null)
             {
                 gravityResetCoroutine = StartCoroutine(ResetGravityAfterDelay());
             }
         }
-        
+
         private void CancelGravityReset()
         {
             if (gravityResetCoroutine != null)
@@ -253,122 +277,127 @@ namespace Enemies.Navigation
                 Debug.Log("Gravity reset timer canceled");
             }
         }
-        
+
         private IEnumerator ResetGravityAfterDelay()
         {
             Debug.Log($"Starting gravity reset timer: {gravityResetDelay} seconds. Currently isClimbing={isClimbing}");
-            
-            // Wait for the specified delay time
             yield return new WaitForSeconds(gravityResetDelay);
-            
-            // Reset gravity and stop climbing
             StopClimbing();
             Debug.Log($"Gravity reset to: {originalGravity} after delay");
             gravityResetCoroutine = null;
         }
-        
+
         public void StopClimbing()
         {
             if (isClimbing)
             {
                 isClimbing = false;
                 isAtTopOfLadder = false;
-                rb.gravityScale = originalGravity; // Restore original gravity
-                
+                rb.gravityScale = originalGravity;
+
                 if (animator != null)
                 {
                     animator.SetBool("isClimbing", false);
-                    animator.speed = 1.0f; // Reset animation speed
+                    animator.speed = 1.0f;
                 }
-                
+
                 Debug.Log($"Stopped climbing. Gravity restored to {originalGravity}");
             }
         }
-        
-        // This is called when the NavigationController transitions states
+
         public void OnNavigationStateChanged(NavigationState newState)
         {
-            // If we're transitioning away from climbing state
+            // If leaving climbing state
             if (newState != NavigationState.Climbing)
             {
-                // Check if we need to stop climbing immediately
                 bool shouldStopImmediately = newState == NavigationState.Falling ||
-                                            newState == NavigationState.Jumping;
-                
+                                             newState == NavigationState.Jumping;
+
                 if (shouldStopImmediately)
                 {
-                    // Cancel any pending gravity reset and stop climbing right away
                     CancelGravityReset();
                     StopClimbing();
                     Debug.Log($"Force stopped climbing due to state change to {newState}");
                 }
             }
         }
-        
-        // Call this when the entity is destroyed or disabled
+
         private void OnDisable()
         {
-            // Ensure we don't leave the gravity at zero
             if (rb != null && isClimbing)
             {
                 rb.gravityScale = originalGravity;
                 Debug.Log($"OnDisable: Restored gravity to {originalGravity}");
             }
-            
-            // Clean up any running coroutines
+
             if (gravityResetCoroutine != null)
             {
                 StopCoroutine(gravityResetCoroutine);
                 gravityResetCoroutine = null;
             }
         }
-        
+
         private void OnDrawGizmos()
         {
             if (!Application.isPlaying) return;
-            
-            // Draw ladder detection
+
+            // Draw ladder top line
             if (currentLadderCollider != null)
             {
-                // Draw the ladder top
                 Gizmos.color = Color.cyan;
-                Vector3 topPos = new Vector3(currentLadderCollider.bounds.center.x, currentLadderCollider.bounds.max.y, 0);
+                Vector3 topPos = new Vector3(
+                    currentLadderCollider.bounds.center.x,
+                    currentLadderCollider.bounds.max.y,
+                    0
+                );
                 Gizmos.DrawLine(topPos - Vector3.right * 0.5f, topPos + Vector3.right * 0.5f);
-                
-                // Label the ladder top position
-                #if UNITY_EDITOR
-                UnityEditor.Handles.Label(topPos + Vector3.up * 0.2f, $"Ladder Top: {ladderTopPosition:F2}");
-                #endif
+
+#if UNITY_EDITOR
+                UnityEditor.Handles.Label(
+                    topPos + Vector3.up * 0.2f,
+                    $"Ladder Top: {ladderTopPosition:F2}"
+                );
+#endif
             }
-            
-            // Draw LadderCheck bounds if available
+
+            // Draw LadderCheck bounds
             if (ladderCheckTransform != null)
             {
                 Collider2D ladderCheckCollider = ladderCheckTransform.GetComponent<Collider2D>();
                 if (ladderCheckCollider != null)
                 {
                     Gizmos.color = Color.yellow;
-                    Gizmos.DrawWireCube(ladderCheckCollider.bounds.center, ladderCheckCollider.bounds.size);
-                    
-                    // Draw the bottom point of the LadderCheck
+                    Gizmos.DrawWireCube(
+                        ladderCheckCollider.bounds.center,
+                        ladderCheckCollider.bounds.size
+                    );
+
                     Gizmos.color = Color.red;
-                    Vector3 bottomPos = new Vector3(ladderCheckCollider.bounds.center.x, ladderCheckCollider.bounds.min.y, 0);
+                    Vector3 bottomPos = new Vector3(
+                        ladderCheckCollider.bounds.center.x,
+                        ladderCheckCollider.bounds.min.y,
+                        0
+                    );
                     Gizmos.DrawSphere(bottomPos, 0.1f);
-                    
-                    #if UNITY_EDITOR
-                    UnityEditor.Handles.Label(bottomPos - Vector3.up * 0.2f, $"Bottom: {ladderCheckCollider.bounds.min.y:F2}");
-                    #endif
+
+#if UNITY_EDITOR
+                    UnityEditor.Handles.Label(
+                        bottomPos - Vector3.up * 0.2f,
+                        $"Bottom: {ladderCheckCollider.bounds.min.y:F2}"
+                    );
+#endif
                 }
             }
-            
-            // Draw climbing status
-            #if UNITY_EDITOR
+
+#if UNITY_EDITOR
             if (isClimbing)
             {
-                UnityEditor.Handles.Label(transform.position + Vector3.up * 2f, 
-                    $"Climbing: {isClimbing}\nDetecting Ladder: {IsLadderDetected()}");
+                UnityEditor.Handles.Label(
+                    transform.position + Vector3.up * 2f,
+                    $"Climbing: {isClimbing}\nDetecting Ladder: {IsLadderDetected()}"
+                );
             }
-            #endif
+#endif
         }
     }
 }

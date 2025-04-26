@@ -401,6 +401,9 @@ PrefabInstance:
     - targetCorrespondingSourceObject: {fileID: 7727505174786697323, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
       insertIndex: -1
       addedObject: {fileID: 789909950}
+    - targetCorrespondingSourceObject: {fileID: 7727505174786697323, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 789909959}
   m_SourcePrefab: {fileID: 100100000, guid: b1c84703b07e94d4ab986f4c609603f4, type: 3}
 --- !u!4 &189073055 stripped
 Transform:
@@ -2528,9 +2531,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ba58abfc452dd964696c0a69b097acd2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  gravityResetDelay: 6
+  ladderGracePeriod: 0.2
+  gravityResetDelay: 2
   topLadderSafetyMargin: 2.5
   climbCompletionThreshold: 2
+  exitJumpForce: 22
+  exitHorizontalForce: 2
   debugLadderDetection: 1
 --- !u!114 &789909950
 MonoBehaviour:
@@ -2554,6 +2560,23 @@ MonoBehaviour:
   directPathColor: {r: 0, g: 1, b: 0, a: 1}
   alternatePathColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
   blockedPathColor: {r: 1, g: 0, b: 0, a: 1}
+--- !u!114 &789909959
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 789909916}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ed25aec6bd3015e45991a9f478405452, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  obstacleLayerMask:
+    serializedVersion: 2
+    m_Bits: 4160
+  obstacleCheckResolution: 0.25
+  visualizePaths: 1
 --- !u!1001 &803739208
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -9810,7 +9833,7 @@ Transform:
   m_GameObject: {fileID: 2110636892}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -155.66, y: 138.96, z: 0}
+  m_LocalPosition: {x: -155.57, y: 135.97, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -10060,7 +10083,7 @@ Transform:
   m_GameObject: {fileID: 2140996762}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -155.69, y: 126, z: 0}
+  m_LocalPosition: {x: -155.69, y: 123.85, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
