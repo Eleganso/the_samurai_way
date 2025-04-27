@@ -11,7 +11,9 @@ namespace Enemies.Navigation
         LadderBottom,   // Bottom of a ladder
         LadderTop,      // Top of a ladder
         JumpPoint,      // Point where enemies can jump from
-        LandingPoint    // Point where enemies can safely land
+        LandingPoint,   // Point where enemies can safely land
+        EdgeTop,        // Top of a platform edge where enemies can jump down
+        EdgeBottom      // Landing point at the bottom of a drop
     }
 
     // Waypoint class that can be placed in the level
@@ -25,18 +27,50 @@ namespace Enemies.Navigation
         [SerializeField] private Color gizmoColor = Color.cyan;
         
         [Header("Special Properties")]
-        [SerializeField] private Waypoint linkedWaypoint; // For ladder top/bottom pairs
+        [SerializeField] private Waypoint linkedWaypoint; // For ladder top/bottom pairs or edge top/bottom pairs
         [SerializeField] private float costModifier = 1f; // Higher means less desirable path
+        [SerializeField] private bool allowDownwardOnly = false; // For EdgeTop waypoints, only allow downward movement
 
         // Public properties
         public WaypointType Type => type;
         public List<Waypoint> Connections => connections;
         public Waypoint LinkedWaypoint => linkedWaypoint;
         public float CostModifier => costModifier;
+        public bool AllowDownwardOnly => allowDownwardOnly;
         
         // Auto-connections in editor
         private void OnValidate()
         {
+            // Auto-set allowDownwardOnly for EdgeTop waypoints
+            if (type == WaypointType.EdgeTop && !allowDownwardOnly)
+                allowDownwardOnly = true;
+
+            // Set default color based on type
+            switch (type)
+            {
+                case WaypointType.Standard:
+                    gizmoColor = Color.cyan;
+                    break;
+                case WaypointType.LadderBottom:
+                    gizmoColor = Color.blue;
+                    break;
+                case WaypointType.LadderTop:
+                    gizmoColor = Color.red;
+                    break;
+                case WaypointType.JumpPoint:
+                    gizmoColor = Color.green;
+                    break;
+                case WaypointType.LandingPoint:
+                    gizmoColor = Color.yellow;
+                    break;
+                case WaypointType.EdgeTop:
+                    gizmoColor = new Color(1f, 0.5f, 0f); // Orange
+                    break;
+                case WaypointType.EdgeBottom:
+                    gizmoColor = new Color(0.5f, 0f, 1f); // Purple
+                    break;
+            }
+
             if (autoConnectInRadius && Application.isEditor && !Application.isPlaying)
             {
                 AutoConnectNearbyWaypoints();
@@ -56,7 +90,35 @@ namespace Enemies.Navigation
                     float distance = Vector2.Distance(transform.position, waypoint.transform.position);
                     if (distance <= connectionRadius)
                     {
-                        connections.Add(waypoint);
+                        // Special case for EdgeTop - only connect to EdgeBottom or same-level waypoints
+                        if (type == WaypointType.EdgeTop)
+                        {
+                            // Allow connections to EdgeBottom below or same-level waypoints
+                            if (waypoint.Type == WaypointType.EdgeBottom && 
+                                waypoint.transform.position.y < transform.position.y)
+                            {
+                                connections.Add(waypoint);
+                            }
+                            else if (waypoint.Type != WaypointType.EdgeBottom && 
+                                    Mathf.Abs(waypoint.transform.position.y - transform.position.y) < 0.5f)
+                            {
+                                connections.Add(waypoint);
+                            }
+                        }
+                        // Special case for EdgeBottom - don't connect to EdgeTop above
+                        else if (type == WaypointType.EdgeBottom)
+                        {
+                            if (waypoint.Type != WaypointType.EdgeTop || 
+                                waypoint.transform.position.y <= transform.position.y)
+                            {
+                                connections.Add(waypoint);
+                            }
+                        }
+                        else
+                        {
+                            // Standard connection for other waypoint types
+                            connections.Add(waypoint);
+                        }
                     }
                 }
             }
@@ -82,11 +144,20 @@ namespace Enemies.Navigation
             {
                 if (connection != null)
                 {
-                    Gizmos.DrawLine(transform.position, connection.transform.position);
+                    // Different line styles for different connection types
+                    if (type == WaypointType.EdgeTop && connection.Type == WaypointType.EdgeBottom)
+                    {
+                        // Draw dashed line for EdgeTop to EdgeBottom (one-way connection)
+                        DrawDottedLine(transform.position, connection.transform.position, 0.2f);
+                    }
+                    else
+                    {
+                        Gizmos.DrawLine(transform.position, connection.transform.position);
+                    }
                 }
             }
             
-            // Draw special link (e.g., ladder connection)
+            // Draw special link (e.g., ladder connection or edge connection)
             if (linkedWaypoint != null)
             {
                 Gizmos.color = Color.yellow;
@@ -98,6 +169,25 @@ namespace Enemies.Navigation
             UnityEditor.Handles.Label(transform.position + Vector3.up * 0.5f, type.ToString());
             #endif
         }
+        
+        // Helper method to draw dotted lines in the editor
+        private void DrawDottedLine(Vector3 start, Vector3 end, float segmentSize)
+        {
+            Vector3 direction = (end - start).normalized;
+            float distance = Vector3.Distance(start, end);
+            int segments = Mathf.FloorToInt(distance / segmentSize);
+            
+            for (int i = 0; i < segments; i += 2)
+            {
+                float startDistance = i * segmentSize;
+                float endDistance = Mathf.Min((i + 1) * segmentSize, distance);
+                
+                Gizmos.DrawLine(
+                    start + direction * startDistance,
+                    start + direction * endDistance
+                );
+            }
+        }
     }
 
     // Main waypoint manager class
@@ -107,6 +197,12 @@ namespace Enemies.Navigation
         private static WaypointSystem instance;
         
         [SerializeField] private bool drawGizmos = true;
+        [SerializeField] private bool logPathfinding = false;
+        
+        // Special movement settings
+        [Header("Vertical Movement Costs")]
+        [SerializeField] private float climbUpCost = 1.5f; // Cost multiplier for climbing up
+        [SerializeField] private float jumpDownCost = 0.8f; // Cost multiplier for jumping down (lower = preferred)
         
         private Waypoint[] allWaypoints;
         private Dictionary<WaypointType, List<Waypoint>> waypointsByType;
@@ -220,7 +316,10 @@ namespace Enemies.Navigation
                 // Goal reached
                 if (current == goal)
                 {
-                    return ReconstructPath(cameFrom, current);
+                    var path = ReconstructPath(cameFrom, current);
+                    if (logPathfinding)
+                        LogPath(path);
+                    return path;
                 }
                 
                 openSet.Remove(current);
@@ -231,29 +330,92 @@ namespace Enemies.Navigation
                     if (neighbor == null || closedSet.Contains(neighbor))
                         continue;
                         
-                    float tentativeGScore = gScore[current] + 
-                        Vector2.Distance(current.transform.position, neighbor.transform.position) * 
-                        neighbor.CostModifier;
+                    // Check for special cases of vertical movement
+                    if (current.Type == WaypointType.EdgeTop && neighbor.Type == WaypointType.EdgeBottom)
+                    {
+                        // Edge top to edge bottom - jumping down
+                        if (current.transform.position.y <= neighbor.transform.position.y)
+                        {
+                            // Invalid downward connection - EdgeBottom should be below EdgeTop
+                            continue;
+                        }
                         
-                    if (!openSet.Contains(neighbor))
-                    {
-                        openSet.Add(neighbor);
+                        // Calculate cost with jump down modifier
+                        float moveCost = Vector2.Distance(current.transform.position, neighbor.transform.position) * 
+                                       jumpDownCost * neighbor.CostModifier;
+                        float tentativeGScore = gScore[current] + moveCost;
+                        
+                        ProcessNeighbor(current, neighbor, tentativeGScore, gScore, fScore, cameFrom, openSet, goal);
                     }
-                    else if (tentativeGScore >= gScore[neighbor])
+                    else if (current.Type == WaypointType.EdgeBottom && neighbor.Type == WaypointType.EdgeTop)
                     {
+                        // Cannot go from edge bottom to edge top (one-way connection)
                         continue;
                     }
-                    
-                    // This is a better path
-                    cameFrom[neighbor] = current;
-                    gScore[neighbor] = tentativeGScore;
-                    fScore[neighbor] = gScore[neighbor] + 
-                        Vector2.Distance(neighbor.transform.position, goal.transform.position);
+                    else if ((current.Type == WaypointType.LadderBottom && neighbor.Type == WaypointType.LadderTop) ||
+                            (neighbor.transform.position.y > current.transform.position.y + 1.0f)) // Any significant climb up
+                    {
+                        // Climbing up - higher cost
+                        float moveCost = Vector2.Distance(current.transform.position, neighbor.transform.position) * 
+                                       climbUpCost * neighbor.CostModifier;
+                        float tentativeGScore = gScore[current] + moveCost;
+                        
+                        ProcessNeighbor(current, neighbor, tentativeGScore, gScore, fScore, cameFrom, openSet, goal);
+                    }
+                    else
+                    {
+                        // Standard movement
+                        float moveCost = Vector2.Distance(current.transform.position, neighbor.transform.position) * 
+                                       neighbor.CostModifier;
+                        float tentativeGScore = gScore[current] + moveCost;
+                        
+                        ProcessNeighbor(current, neighbor, tentativeGScore, gScore, fScore, cameFrom, openSet, goal);
+                    }
                 }
             }
             
             // No path found
+            if (logPathfinding)
+                Debug.LogWarning("No path found between waypoints");
             return new List<Waypoint>();
+        }
+        
+        // Helper method to process a neighbor in A* pathfinding
+        private void ProcessNeighbor(
+            Waypoint current, 
+            Waypoint neighbor, 
+            float tentativeGScore, 
+            Dictionary<Waypoint, float> gScore, 
+            Dictionary<Waypoint, float> fScore,
+            Dictionary<Waypoint, Waypoint> cameFrom,
+            List<Waypoint> openSet,
+            Waypoint goal)
+        {
+            if (!openSet.Contains(neighbor))
+            {
+                openSet.Add(neighbor);
+            }
+            else if (tentativeGScore >= gScore[neighbor])
+            {
+                return; // Not a better path
+            }
+            
+            // This is a better path
+            cameFrom[neighbor] = current;
+            gScore[neighbor] = tentativeGScore;
+            fScore[neighbor] = gScore[neighbor] + 
+                Vector2.Distance(neighbor.transform.position, goal.transform.position);
+        }
+        
+        // Helper to log a path for debugging
+        private void LogPath(List<Waypoint> path)
+        {
+            string pathDesc = "Path: ";
+            foreach (var waypoint in path)
+            {
+                pathDesc += $"{waypoint.Type}({waypoint.name}) -> ";
+            }
+            Debug.Log(pathDesc.TrimEnd('-', ' ', '>'));
         }
         
         // Find path from position to position using nearest waypoints
@@ -282,6 +444,65 @@ namespace Enemies.Navigation
             path.Add(goal);
             
             return path;
+        }
+        
+        // Find path with special consideration for vertical movement
+        public List<Vector2> FindPathWithVerticalMovement(Vector2 start, Vector2 goal, bool canClimbUp, bool canJumpDown, float waypointSearchRadius = 10f)
+        {
+            // Find nearest appropriate waypoints based on capabilities
+            Waypoint startWaypoint = FindAppropriateWaypoint(start, waypointSearchRadius);
+            Waypoint goalWaypoint = FindAppropriateWaypoint(goal, waypointSearchRadius);
+            
+            if (startWaypoint == null || goalWaypoint == null)
+            {
+                return new List<Vector2>();
+            }
+            
+            // Find waypoint path
+            List<Waypoint> waypointPath = FindPath(startWaypoint, goalWaypoint);
+            
+            // Convert to positions
+            List<Vector2> path = new List<Vector2> { start };
+            foreach (Waypoint waypoint in waypointPath)
+            {
+                path.Add((Vector2)waypoint.transform.position);
+            }
+            path.Add(goal);
+            
+            return path;
+        }
+        
+        // Find appropriate waypoint based on position and vertical capabilities
+        private Waypoint FindAppropriateWaypoint(Vector2 position, float searchRadius)
+        {
+            // First try to find exact matches by type
+            List<Waypoint> nearbyWaypoints = FindWaypointsInRadius(position, searchRadius);
+            
+            if (nearbyWaypoints.Count == 0)
+                return null;
+                
+            // Find the closest waypoint that is appropriate
+            float closestDistance = float.MaxValue;
+            Waypoint bestWaypoint = null;
+            
+            foreach (Waypoint waypoint in nearbyWaypoints)
+            {
+                float distance = Vector2.Distance(position, waypoint.transform.position);
+                
+                // Prioritize waypoints at similar height
+                if (Mathf.Abs(waypoint.transform.position.y - position.y) < 1.0f)
+                {
+                    distance *= 0.8f; // Give preference to waypoints at similar height
+                }
+                
+                if (distance < closestDistance)
+                {
+                    closestDistance = distance;
+                    bestWaypoint = waypoint;
+                }
+            }
+            
+            return bestWaypoint;
         }
         
         // Reconstruct path from A* result

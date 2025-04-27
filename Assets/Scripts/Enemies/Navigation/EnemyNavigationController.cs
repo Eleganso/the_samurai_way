@@ -719,32 +719,84 @@ namespace Enemies.Navigation
         /// Determine if the enemy should climb
         /// </summary>
         private bool ShouldClimb()
+{
+    // Special case: if we're already climbing and the ClimbController says we're on a ladder, keep climbing
+    if (currentState == NavigationState.Climbing && climbController != null && climbController.IsLadderDetected())
+    {
+        return true;
+    }
+    
+    // Increase this distance check to detect ladders from further away
+    float ladderDetectionRadius = waypointDetectionRadius * 0.5f; // Use half the waypoint detection radius
+    
+    // Check if any ladder waypoints are within detection radius
+    bool ladderPathAvailable = false;
+    if (waypointSystem != null)
+    {
+        // Try to find a ladder waypoint within the detection radius
+        var method = waypointSystem.GetType().GetMethod("FindWaypointsInRadius", 
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+            
+        if (method != null)
         {
-            // Special case: if we're already climbing and the ClimbController says we're on a ladder, keep climbing
-            if (currentState == NavigationState.Climbing && climbController != null && climbController.IsLadderDetected())
+            // Search for LadderBottom waypoints
+            var ladderBottoms = method.Invoke(waypointSystem, 
+                new object[] { (Vector2)transform.position, ladderDetectionRadius, WaypointType.LadderBottom });
+                
+            if (ladderBottoms is IList ladderList && ladderList.Count > 0)
             {
+                ladderPathAvailable = true;
+                if (debugAvoidanceDecisions)
+                    Debug.Log($"Found ladder waypoint within {ladderDetectionRadius} units");
+            }
+        }
+    }
+    
+    // Extended ladder detection - consider ladders from further away
+    if (ladderPathAvailable || isLadderDetected) 
+    {
+        // When using an intermediate target, adjust the target reference for decisions
+        Transform effectiveTarget = (intermediateTarget != null) ? intermediateTarget : target;
+        
+        // Climb if target is above or if trying to reach intermediate waypoint via ladder path
+        if (effectiveTarget.position.y > transform.position.y + 0.5f) 
+        {
+            if (debugAvoidanceDecisions)
+                Debug.Log("Choosing to climb because target is above");
+            return true;
+        }
+        
+        // Climb if we can't jump over an obstacle and target is behind it
+        if (isObstacleAhead && !jumpController.CanJumpOver(isFacingRight))
+        {
+            float obstDir = isFacingRight ? 1 : -1;
+            float targDir = effectiveTarget.position.x - transform.position.x;
+            if (Mathf.Sign(targDir) == obstDir) 
+            {
+                if (debugAvoidanceDecisions)
+                    Debug.Log("Choosing to climb to get past obstacle");
                 return true;
             }
-            
-            // Standard ladder detection
-            if (!isLadderDetected) return false;
-            
-            // When using an intermediate target, adjust the target reference for decisions
-            Transform effectiveTarget = (intermediateTarget != null) ? intermediateTarget : target;
-            
-            // Climb if target is above
-            if (effectiveTarget.position.y > transform.position.y + 0.5f) return true;
-            
-            // Climb if we can't jump over an obstacle and target is behind it
-            if (isObstacleAhead && !jumpController.CanJumpOver(isFacingRight))
-            {
-                float obstDir = isFacingRight ? 1 : -1;
-                float targDir = effectiveTarget.position.x - transform.position.x;
-                if (Mathf.Sign(targDir) == obstDir) return true;
-            }
-            
-            return false;
         }
+    }
+    
+    // Standard ladder detection
+    if (!isLadderDetected) return false;
+    
+    // Original remaining logic
+    Transform finalTarget = (intermediateTarget != null) ? intermediateTarget : target;
+    if (finalTarget.position.y > transform.position.y + 0.5f) return true;
+    
+    // Climb if we can't jump over an obstacle and target is behind it
+    if (isObstacleAhead && !jumpController.CanJumpOver(isFacingRight))
+    {
+        float obstDir = isFacingRight ? 1 : -1;
+        float targDir = finalTarget.position.x - transform.position.x;
+        if (Mathf.Sign(targDir) == obstDir) return true;
+    }
+    
+    return false;
+}
 
         /// <summary>
         /// Reconsider the path when an obstacle is encountered
@@ -948,19 +1000,95 @@ namespace Enemies.Navigation
         /// Advance to the next waypoint in the path
         /// </summary>
         private void AdvanceToNextWaypoint()
+{
+    if (!isUsingAlternatePath || alternatePath.Count <= 2 || currentPathIndex >= alternatePath.Count - 1)
+    {
+        ClearAlternatePath();
+        return;
+    }
+    
+    // Store the current waypoint information before moving to the next
+    Vector2 currentWaypointPos = alternatePath[currentPathIndex];
+    Vector2 nextWaypointPos = alternatePath[currentPathIndex + 1];
+    
+    // Check if we're at an EdgeTop waypoint and next is EdgeBottom
+    bool isJumpDownTransition = false;
+    
+    // Find the waypoints to check their types
+    Waypoint currentWaypoint = FindWaypointAtPosition(currentWaypointPos);
+    Waypoint nextWaypoint = FindWaypointAtPosition(nextWaypointPos);
+    
+    if (currentWaypoint != null && nextWaypoint != null)
+    {
+        if (currentWaypoint.Type == WaypointType.EdgeTop && nextWaypoint.Type == WaypointType.EdgeBottom)
         {
-            if (!isUsingAlternatePath || alternatePath.Count <= 2 || currentPathIndex >= alternatePath.Count - 1)
-            {
-                ClearAlternatePath();
-                return;
-            }
+            isJumpDownTransition = true;
             
-            currentPathIndex++;
-            SetIntermediateTarget(alternatePath[currentPathIndex]);
+            // Special handling for jumping/falling down
+            currentState = NavigationState.Falling;
             
+            // Log the transition
             if (debugAvoidanceDecisions)
-                Debug.Log($"Advanced to waypoint {currentPathIndex} of {alternatePath.Count-1}");
+                Debug.Log($"EdgeTop to EdgeBottom transition detected. Forcing fall state.");
+                
+            // Notify about the state change
+            NotifyStateChange(NavigationState.Falling);
+                
+            // Ensure the enemy doesn't stop at the edge by setting velocity directly
+            if (rb != null)
+            {
+                // Set a small horizontal velocity in the direction of the edge
+                float directionX = Mathf.Sign(nextWaypointPos.x - currentWaypointPos.x);
+                float fallVelocity = directionX == 0 ? 0 : directionX * moveSpeed * 0.5f;
+                
+                // Apply fall velocity - keep y component to allow gravity to work
+                rb.linearVelocity = new Vector2(fallVelocity, rb.linearVelocity.y);
+            }
         }
+    }
+    
+    // Advance to the next waypoint
+    currentPathIndex++;
+    SetIntermediateTarget(alternatePath[currentPathIndex]);
+    
+    if (debugAvoidanceDecisions)
+        Debug.Log($"Advanced to waypoint {currentPathIndex} of {alternatePath.Count-1}" + 
+                  (isJumpDownTransition ? " (Jump Down)" : ""));
+}
+
+/// <summary>
+/// Helper method to find a waypoint at a specific position
+/// </summary>
+private Waypoint FindWaypointAtPosition(Vector2 position)
+{
+    if (waypointSystem == null)
+        return null;
+        
+    // Use reflection to access the FindNearestWaypoint method
+    var method = waypointSystem.GetType().GetMethod("FindNearestWaypoint", 
+        System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance,
+        null,
+        new System.Type[] { typeof(Vector2) },
+        null);
+        
+    if (method != null)
+    {
+        // The tolerance for considering a waypoint to be at the position
+        const float positionTolerance = 0.1f;
+        
+        // Call the method to find the nearest waypoint
+        Waypoint nearestWaypoint = method.Invoke(waypointSystem, new object[] { position }) as Waypoint;
+        
+        // Check if the waypoint is close enough to the position
+        if (nearestWaypoint != null && 
+            Vector2.Distance(position, (Vector2)nearestWaypoint.transform.position) < positionTolerance)
+        {
+            return nearestWaypoint;
+        }
+    }
+    
+    return null;
+}
 
         /// <summary>
         /// Draw debug information in the editor
