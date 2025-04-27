@@ -2469,7 +2469,7 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 2097152
   useEnhancedNavigation: 1
-  waypointDetectionRadius: 10
+  waypointDetectionRadius: 50
   alternateRoutePreference: 0.8
   intermediateTargetReachedDistance: 1
   pathRecalculationInterval: 1.5
@@ -2562,7 +2562,7 @@ MonoBehaviour:
   directPathCostWeight: 1
   heightDifferenceWeight: 2
   obstacleCountWeight: 3
-  maxPathfindingDistance: 50
+  maxPathfindingDistance: 200
   visualizePaths: 1
   directPathColor: {r: 0, g: 1, b: 0, a: 1}
   alternatePathColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
@@ -8310,7 +8310,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   type: 0
-  connections: []
+  connections:
+  - {fileID: 2013843923}
   connectionRadius: 25
   autoConnectInRadius: 1
   gizmoColor: {r: 0, g: 1, b: 1, a: 1}
@@ -9668,11 +9669,7 @@ MonoBehaviour:
   - {fileID: 1634861621}
   connectionRadius: 15
   autoConnectInRadius: 1
-  gizmoColor:
-    r: 0
-    g: 1
-    b: 1
-    a: 1
+  gizmoColor: {r: 0, g: 1, b: 1, a: 1}
   linkedWaypoint: {fileID: 2110636893}
   costModifier: 1
 --- !u!4 &2013843924
