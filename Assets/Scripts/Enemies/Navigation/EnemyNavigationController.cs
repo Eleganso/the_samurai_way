@@ -77,6 +77,7 @@ namespace Enemies.Navigation
         private bool shouldClimb;
         private float lastAggroTime;
         private bool isNavigationPaused = false;
+        public LayerMask ObstacleLayer => obstacleLayer;
 
         // Advanced navigation
         private WaypointSystem waypointSystem;
