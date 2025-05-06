@@ -912,6 +912,21 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 2082398425929404629, guid: df0846516ecd821489a144afc982365d, type: 3}
   m_PrefabInstance: {fileID: 1677489137}
   m_PrefabAsset: {fileID: 0}
+--- !u!115 &375090891
+MonoScript:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: 
+  serializedVersion: 7
+  m_DefaultReferences: {}
+  m_Icon: {fileID: 0}
+  m_Type: 0
+  m_ExecutionOrder: 0
+  m_ClassName: Waypoint
+  m_Namespace: Enemies.Navigation
+  m_AssemblyName: Assembly-CSharp
 --- !u!1001 &379982020
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -2331,14 +2346,15 @@ MonoBehaviour:
   m_Script: {fileID: 489219339}
   m_Name: 
   m_EditorClassIdentifier: 
-  type: 0
+  type: 5
   connections:
   - {fileID: 2046533843}
   connectionRadius: 25
   autoConnectInRadius: 1
-  gizmoColor: {r: 0, g: 1, b: 1, a: 1}
+  gizmoColor: {r: 1, g: 0.5, b: 0, a: 1}
   linkedWaypoint: {fileID: 2110636893}
   costModifier: 1
+  allowDownwardOnly: 1
 --- !u!4 &789891550
 Transform:
   m_ObjectHideFlags: 0
@@ -2469,17 +2485,17 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 2097152
   useEnhancedNavigation: 1
-  waypointDetectionRadius: 50
-  alternateRoutePreference: 0.8
+  waypointDetectionRadius: 300
+  alternateRoutePreference: 0.1
   intermediateTargetReachedDistance: 1
   pathRecalculationInterval: 1.5
   visualizeEnhancedPaths: 1
   avoidedLayers:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 4160
   alwaysUseAlternateForAvoidedLayers: 1
   avoidedLayerCheckFrequency: 0.5
-  debugAvoidanceDecisions: 0
+  debugAvoidanceDecisions: 1
 --- !u!114 &789909939
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2557,12 +2573,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: cad83b92c83eb334f8042b7d1cde7787, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  maxPredictionSteps: 20
-  stepDistance: 5
-  directPathCostWeight: 1
-  heightDifferenceWeight: 2
+  maxPredictionSteps: 200
+  stepDistance: 50
+  directPathCostWeight: 100
+  heightDifferenceWeight: 200
   obstacleCountWeight: 3
-  maxPathfindingDistance: 200
+  maxPathfindingDistance: 500
   visualizePaths: 1
   directPathColor: {r: 0, g: 1, b: 0, a: 1}
   alternatePathColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
@@ -2588,10 +2604,16 @@ MonoBehaviour:
     m_Bits: 4160
   prioritizeAlternatePaths: 1
   pathRecalculationInterval: 0.5
+  maxPathfindingDistance: 200
+  waypointSearchRadius: 200
+  alwaysUseAlternateWhenBlocked: 1
   visualizePaths: 1
+  debugLogDecisions: 1
+  useOffsetDebugLabels: 1
   directPathColor: {r: 1, g: 1, b: 1, a: 1}
   avoidedPathColor: {r: 1, g: 0, b: 0, a: 1}
   alternatePathColor: {r: 0, g: 1, b: 0, a: 1}
+  blockedPathColor: {r: 1, g: 0, b: 1, a: 1}
 --- !u!1001 &803739208
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -3570,6 +3592,12 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   drawGizmos: 1
+  logPathfinding: 0
+  climbUpCost: 1.5
+  jumpDownCost: 0.8
+  tryAllWaypointCombinations: 1
+  prioritizeLadders: 1
+  maxPathfindingIterations: 20
 --- !u!4 &1119106264
 Transform:
   m_ObjectHideFlags: 0
@@ -3959,6 +3987,58 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1872751324}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1206146526
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1206146528}
+  - component: {fileID: 1206146527}
+  m_Layer: 0
+  m_Name: Waypoint_EdgeTop
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1206146527
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1206146526}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 375090891}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  type: 5
+  connections: []
+  connectionRadius: 5
+  autoConnectInRadius: 1
+  gizmoColor: {r: 1, g: 0.5, b: 0, a: 1}
+  linkedWaypoint: {fileID: 1634861621}
+  costModifier: 1
+  allowDownwardOnly: 1
+--- !u!4 &1206146528
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1206146526}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -183.32, y: 136.97, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!4 &1212763237 stripped
 Transform:
@@ -8291,7 +8371,7 @@ GameObject:
   - component: {fileID: 1634861622}
   - component: {fileID: 1634861621}
   m_Layer: 0
-  m_Name: Waypoint_Standard
+  m_Name: Waypoint_EdgeBottom
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -8309,14 +8389,14 @@ MonoBehaviour:
   m_Script: {fileID: 489219339}
   m_Name: 
   m_EditorClassIdentifier: 
-  type: 0
-  connections:
-  - {fileID: 2013843923}
+  type: 6
+  connections: []
   connectionRadius: 25
   autoConnectInRadius: 1
-  gizmoColor: {r: 0, g: 1, b: 1, a: 1}
+  gizmoColor: {r: 0.5, g: 0, b: 1, a: 1}
   linkedWaypoint: {fileID: 2140996763}
   costModifier: 1
+  allowDownwardOnly: 0
 --- !u!4 &1634861622
 Transform:
   m_ObjectHideFlags: 0
@@ -9669,9 +9749,14 @@ MonoBehaviour:
   - {fileID: 1634861621}
   connectionRadius: 15
   autoConnectInRadius: 1
-  gizmoColor: {r: 0, g: 1, b: 1, a: 1}
+  gizmoColor:
+    r: 0
+    g: 1
+    b: 1
+    a: 1
   linkedWaypoint: {fileID: 2110636893}
   costModifier: 1
+  allowDownwardOnly: 0
 --- !u!4 &2013843924
 Transform:
   m_ObjectHideFlags: 0
@@ -9716,14 +9801,14 @@ MonoBehaviour:
   m_Script: {fileID: 489219339}
   m_Name: 
   m_EditorClassIdentifier: 
-  type: 0
-  connections:
-  - {fileID: 789891549}
+  type: 6
+  connections: []
   connectionRadius: 25
   autoConnectInRadius: 1
-  gizmoColor: {r: 0, g: 1, b: 1, a: 1}
+  gizmoColor: {r: 0.5, g: 0, b: 1, a: 1}
   linkedWaypoint: {fileID: 2140996763}
   costModifier: 1
+  allowDownwardOnly: 0
 --- !u!4 &2046533844
 Transform:
   m_ObjectHideFlags: 0
@@ -9843,6 +9928,7 @@ MonoBehaviour:
   gizmoColor: {r: 1, g: 0, b: 0, a: 1}
   linkedWaypoint: {fileID: 2140996763}
   costModifier: 1
+  allowDownwardOnly: 0
 --- !u!4 &2110636894
 Transform:
   m_ObjectHideFlags: 0
@@ -10094,6 +10180,7 @@ MonoBehaviour:
   gizmoColor: {r: 0, g: 0, b: 1, a: 1}
   linkedWaypoint: {fileID: 2110636893}
   costModifier: 1
+  allowDownwardOnly: 0
 --- !u!4 &2140996764
 Transform:
   m_ObjectHideFlags: 0
@@ -11359,3 +11446,4 @@ SceneRoots:
   - {fileID: 1634861622}
   - {fileID: 2046533844}
   - {fileID: 2013843924}
+  - {fileID: 1206146528}

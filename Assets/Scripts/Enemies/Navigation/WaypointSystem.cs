@@ -197,12 +197,17 @@ namespace Enemies.Navigation
         private static WaypointSystem instance;
         
         [SerializeField] private bool drawGizmos = true;
-        [SerializeField] private bool logPathfinding = false;
+        [SerializeField] private bool logPathfinding = true; // Changed to true by default for debugging
         
         // Special movement settings
         [Header("Vertical Movement Costs")]
         [SerializeField] private float climbUpCost = 1.5f; // Cost multiplier for climbing up
         [SerializeField] private float jumpDownCost = 0.8f; // Cost multiplier for jumping down (lower = preferred)
+        
+        [Header("Advanced Path Settings")]
+        [SerializeField] private bool tryAllWaypointCombinations = true; // NEW: Try all combinations when path is blocked
+        [SerializeField] private bool prioritizeLadders = true; // NEW: Prioritize finding ladder waypoints
+        [SerializeField] private int maxPathfindingIterations = 20; // NEW: Max attempts to find a path
         
         private Waypoint[] allWaypoints;
         private Dictionary<WaypointType, List<Waypoint>> waypointsByType;
@@ -418,22 +423,47 @@ namespace Enemies.Navigation
             Debug.Log(pathDesc.TrimEnd('-', ' ', '>'));
         }
         
-        // Find path from position to position using nearest waypoints
+        // IMPROVED - Find path from position to position using nearest waypoints
         public List<Vector2> FindPathFromPositions(Vector2 start, Vector2 goal, float waypointSearchRadius = 10f)
+        {
+            // 1. Try with standard approach first
+            List<Vector2> path = FindPathFromPositionsStandard(start, goal, waypointSearchRadius);
+            
+            // 2. If standard approach fails and tryAllWaypointCombinations is true, try advanced approach
+            if ((path == null || path.Count <= 1) && tryAllWaypointCombinations)
+            {
+                if (logPathfinding)
+                    Debug.Log($"Standard pathfinding failed. Trying advanced approach with all waypoint combinations...");
+                
+                path = FindPathFromPositionsAdvanced(start, goal, waypointSearchRadius);
+            }
+            
+            return path ?? new List<Vector2>();
+        }
+        
+        // Standard path finding (original implementation)
+        private List<Vector2> FindPathFromPositionsStandard(Vector2 start, Vector2 goal, float waypointSearchRadius)
         {
             // Find nearest waypoints
             Waypoint startWaypoint = FindNearestWaypoint(start);
             Waypoint goalWaypoint = FindNearestWaypoint(goal);
             
+            // Check if waypoints are in range
             if (startWaypoint == null || goalWaypoint == null || 
                 Vector2.Distance(start, startWaypoint.transform.position) > waypointSearchRadius ||
                 Vector2.Distance(goal, goalWaypoint.transform.position) > waypointSearchRadius)
             {
-                return new List<Vector2>();
+                return null; // No waypoints in range
             }
             
             // Find waypoint path
             List<Waypoint> waypointPath = FindPath(startWaypoint, goalWaypoint);
+            
+            // Skip if no path found
+            if (waypointPath.Count == 0)
+            {
+                return null; // No path between waypoints
+            }
             
             // Convert to positions
             List<Vector2> path = new List<Vector2> { start };
@@ -443,7 +473,142 @@ namespace Enemies.Navigation
             }
             path.Add(goal);
             
+            if (logPathfinding)
+                Debug.Log($"Standard pathfinding found path with {waypointPath.Count} waypoints.");
+            
             return path;
+        }
+        
+        // ADVANCED path finding - try all combinations of waypoints within radius
+        private List<Vector2> FindPathFromPositionsAdvanced(Vector2 start, Vector2 goal, float waypointSearchRadius)
+        {
+            // 1. Try to use extended radius first
+            float extendedRadius = waypointSearchRadius * 2f;
+            
+            // 2. Find ALL waypoints in radius (not just nearest)
+            List<Waypoint> possibleStartWaypoints = FindWaypointsInRadius(start, extendedRadius);
+            List<Waypoint> possibleGoalWaypoints = FindWaypointsInRadius(goal, extendedRadius);
+            
+            // 3. Special check for ladder waypoints if prioritizeLadders is true
+            if (prioritizeLadders)
+            {
+                // First look for ladders
+                List<Waypoint> ladderBottoms = FindWaypointsInRadius(start, 100f, WaypointType.LadderBottom);
+                List<Waypoint> ladderTops = FindWaypointsInRadius(start, 100f, WaypointType.LadderTop);
+                
+                // Add ladder waypoints to start list first (prioritize them)
+                foreach (var wp in ladderBottoms)
+                {
+                    if (!possibleStartWaypoints.Contains(wp))
+                        possibleStartWaypoints.Insert(0, wp);  // Add at beginning to prioritize
+                }
+                
+                foreach (var wp in ladderTops)
+                {
+                    if (!possibleStartWaypoints.Contains(wp))
+                        possibleStartWaypoints.Insert(0, wp);  // Add at beginning to prioritize
+                }
+            }
+            
+            // 4. If no waypoints found, use fallback
+            if (possibleStartWaypoints.Count == 0 || possibleGoalWaypoints.Count == 0)
+            {
+                if (logPathfinding)
+                    Debug.Log($"No waypoints in radius {extendedRadius}. Falling back to all waypoints in level.");
+                    
+                // EMERGENCY FALLBACK: Use ALL waypoints in level
+                possibleStartWaypoints = allWaypoints.ToList();
+                possibleGoalWaypoints = allWaypoints.ToList();
+                
+                // Sort by distance to prioritize closer ones
+                possibleStartWaypoints = possibleStartWaypoints
+                    .OrderBy(w => Vector2.Distance(start, w.transform.position))
+                    .ToList();
+                    
+                possibleGoalWaypoints = possibleGoalWaypoints
+                    .OrderBy(w => Vector2.Distance(goal, w.transform.position))
+                    .ToList();
+            }
+            
+            // 5. Try all combinations of start/goal waypoints to find ANY valid path
+            List<Waypoint> bestPath = null;
+            float bestPathDistance = float.MaxValue;
+            
+            // Limit number of iterations for performance
+            int maxStartPoints = Mathf.Min(possibleStartWaypoints.Count, maxPathfindingIterations);
+            int maxGoalPoints = Mathf.Min(possibleGoalWaypoints.Count, maxPathfindingIterations);
+            
+            if (logPathfinding)
+                Debug.Log($"Advanced pathfinding: Trying {maxStartPoints} start points x {maxGoalPoints} end points = {maxStartPoints * maxGoalPoints} combinations.");
+            
+            // Try each combination
+            for (int s = 0; s < maxStartPoints; s++)
+            {
+                Waypoint startWaypoint = possibleStartWaypoints[s];
+                float startDist = Vector2.Distance(start, startWaypoint.transform.position);
+                
+                for (int g = 0; g < maxGoalPoints; g++)
+                {
+                    Waypoint goalWaypoint = possibleGoalWaypoints[g];
+                    float goalDist = Vector2.Distance(goal, goalWaypoint.transform.position);
+                    
+                    // Skip if the waypoints are the same (unless they're very close to start/goal)
+                    if (startWaypoint == goalWaypoint && startDist > 1.0f && goalDist > 1.0f)
+                        continue;
+                    
+                    // Try to find path between these waypoints
+                    List<Waypoint> path = FindPath(startWaypoint, goalWaypoint);
+                    
+                    if (path.Count > 0)
+                    {
+                        // Calculate total path distance including travel to/from waypoints
+                        float pathDistance = startDist; // Distance to first waypoint
+                        
+                        // Distance between waypoints
+                        for (int i = 0; i < path.Count - 1; i++)
+                        {
+                            pathDistance += Vector2.Distance(
+                                path[i].transform.position, 
+                                path[i + 1].transform.position
+                            );
+                        }
+                        
+                        // Distance from last waypoint to goal
+                        pathDistance += goalDist;
+                        
+                        // Check if this path is better than current best
+                        if (pathDistance < bestPathDistance)
+                        {
+                            bestPathDistance = pathDistance;
+                            bestPath = path;
+                            
+                            if (logPathfinding)
+                                Debug.Log($"Found better path: {startWaypoint.Type} to {goalWaypoint.Type}, distance: {pathDistance:F1}");
+                        }
+                    }
+                }
+            }
+            
+            // No path found
+            if (bestPath == null || bestPath.Count == 0)
+            {
+                if (logPathfinding)
+                    Debug.LogWarning("Advanced pathfinding: No valid path found between ANY waypoints!");
+                return null;
+            }
+            
+            // Convert to positions and return
+            List<Vector2> finalPath = new List<Vector2> { start };
+            foreach (Waypoint waypoint in bestPath)
+            {
+                finalPath.Add((Vector2)waypoint.transform.position);
+            }
+            finalPath.Add(goal);
+            
+            if (logPathfinding)
+                Debug.Log($"Advanced pathfinding succeeded! Found path with {bestPath.Count} waypoints, total dist: {bestPathDistance:F2}");
+            
+            return finalPath;
         }
         
         // Find path with special consideration for vertical movement
