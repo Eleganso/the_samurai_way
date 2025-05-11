@@ -2480,7 +2480,7 @@ MonoBehaviour:
   obstacleLayer:
     serializedVersion: 2
     m_Bits: 4160
-  ladderCheckRadius: 0.5
+  ladderCheckRadius: 0.1
   ladderLayer:
     serializedVersion: 2
     m_Bits: 2097152
@@ -9746,6 +9746,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   type: 0
   connections:
+  - {fileID: 1206146527}
   - {fileID: 1634861621}
   connectionRadius: 15
   autoConnectInRadius: 1
